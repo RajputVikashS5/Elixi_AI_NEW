@@ -1,0 +1,26 @@
+{
+  "name": "elixi-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:ui": "vite --config react-ui/vite.config.ts",
+    "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.json && electron .",
+    "build": "npm run build:ui && npm run build:electron",
+    "build:ui": "vite build --config react-ui/vite.config.ts",
+    "build:electron": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "active-win": "^8.2.1",
+    "electron-updater": "^6.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "concurrently": "^8.2.2",
+    "electron": "^30.0.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.10",
+    "wait-on": "^7.2.0"
+  }
+}

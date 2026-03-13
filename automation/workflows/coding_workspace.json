@@ -1,0 +1,10 @@
+{
+  "id": "coding-workspace",
+  "name": "Coding Workspace",
+  "description": "Open tools needed for coding session",
+  "steps": [
+    { "action": "open_app", "target": "vscode" },
+    { "action": "open_app", "target": "explorer" },
+    { "action": "open_url", "url": "http://localhost:5173" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "appName": "ELIXI",
+  "backendPort": 3001,
+  "aiEnginePort": 8000,
+  "voiceEnginePort": 8001,
+  "frontendPort": 5173,
+  "ollama": {
+    "url": "http://localhost:11434",
+    "model": "llama3"
+  },
+  "personalityMode": "professional"
+}

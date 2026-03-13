@@ -1,0 +1,51 @@
+{
+  "name": "elixi",
+  "version": "1.0.0",
+  "description": "ELIXI – Advanced Personal AI System Assistant",
+  "private": true,
+  "workspaces": [
+    "desktop",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:ui": "npm run dev:ui --workspace=desktop",
+    "dev:electron": "wait-on http://localhost:5173 && electron desktop/electron/main.js",
+    "build": "npm run build --workspace=desktop && npm run build --workspace=backend",
+    "start:ai": "cd ai-engine && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
+    "start:voice": "cd voice-engine && uvicorn voice_server:app --host 0.0.0.0 --port 8001 --reload"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.4.5"
+  },
+  "build": {
+    "appId": "com.elixi.app",
+    "productName": "ELIXI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/electron/**/*",
+      "desktop/react-ui/dist/**/*",
+      "backend/dist/**/*",
+      "config/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "desktop/react-ui/public/assets/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "desktop/react-ui/public/assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "desktop/react-ui/public/assets/icon.png"
+    }
+  }
+}

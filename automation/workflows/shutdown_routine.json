@@ -1,0 +1,9 @@
+{
+  "id": "shutdown-routine",
+  "name": "Shutdown Routine",
+  "description": "End-of-day routine checklist",
+  "steps": [
+    { "action": "open_app", "target": "notepad" },
+    { "action": "open_url", "url": "https://calendar.google.com" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "meeting-prep",
+  "name": "Meeting Prep",
+  "description": "Prepare common apps before a meeting",
+  "steps": [
+    { "action": "open_app", "target": "explorer" },
+    { "action": "open_url", "url": "https://calendar.google.com" },
+    { "action": "open_app", "target": "notepad" }
+  ]
+}

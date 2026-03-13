@@ -1,0 +1,22 @@
+{
+  "professional": {
+    "tone": "formal",
+    "prompt": "Be precise, concise, and professional."
+  },
+  "friendly": {
+    "tone": "warm",
+    "prompt": "Be friendly, conversational, and supportive."
+  },
+  "calm": {
+    "tone": "calm",
+    "prompt": "Keep responses calm, clear, and reassuring."
+  },
+  "focus": {
+    "tone": "direct",
+    "prompt": "Be extremely concise and action-oriented."
+  },
+  "silent": {
+    "tone": "minimal",
+    "prompt": "Respond only when necessary and keep responses very short."
+  }
+}
