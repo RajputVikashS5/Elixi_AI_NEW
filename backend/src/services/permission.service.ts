@@ -9,7 +9,8 @@ const DB_PATH = path.resolve(__dirname, '../../../memory/elixi.db');
 const TIER_PATTERNS: { pattern: RegExp; tier: number }[] = [
   { pattern: /^system_info|^get_cpu|^get_ram|^get_disk/, tier: 1 },
   { pattern: /^open_app|^close_app|^play_music|^open_url/, tier: 2 },
-  { pattern: /^create_folder|^search_file|^move_file|^copy_file/, tier: 3 },
+  { pattern: /^switch_app|^create_folder|^search_file|^list_files|^read_file|^move_file|^copy_file/, tier: 3 },
+  { pattern: /^write_file|^delete_file/, tier: 4 },
   { pattern: /^run_command|^exec|^terminal/, tier: 4 },
   { pattern: /^delete_system|^format|^rm -rf/, tier: 5 },
 ];

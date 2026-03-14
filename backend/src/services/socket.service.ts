@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 import { sanitizeInput } from '../utils/sanitizer';
 import { memoryService } from './memory.service';
-import { automationService, WorkflowProgressEvent } from './automation.service';
+import { automationService, WorkflowPermissionError, WorkflowProgressEvent } from './automation.service';
 
 const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://localhost:8000';
 
@@ -152,6 +152,22 @@ export function setupSocketHandlers(io: SocketServer): void {
         });
       } catch (err) {
         logger.error('Socket automation run failed:', err);
+
+        if (err instanceof WorkflowPermissionError) {
+          socket.emit('automation:complete', {
+            runId,
+            workflowId,
+            error: true,
+            message: err.message,
+            requiresApproval: err.detail.requiresApproval,
+            prohibited: err.detail.prohibited,
+            commandPattern: err.detail.commandPattern,
+            tier: err.detail.tier,
+            stepIndex: err.detail.stepIndex,
+          });
+          return;
+        }
+
         socket.emit('automation:complete', {
           runId,
           workflowId,

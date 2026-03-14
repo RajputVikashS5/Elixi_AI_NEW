@@ -16,5 +16,6 @@ const createApiClient = () => {
 export const api = {
   get: <T>(url: string) => createApiClient().get<T>(url),
   post: <T>(url: string, data?: unknown) => createApiClient().post<T>(url, data),
+  put: <T>(url: string, data?: unknown) => createApiClient().put<T>(url, data),
   delete: <T>(url: string) => createApiClient().delete<T>(url),
 };

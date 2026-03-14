@@ -2,12 +2,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+import { z } from 'zod';
 import { commandValidator } from '../utils/commandValidator';
+import { permissionService } from './permission.service';
 import { logger } from '../utils/logger';
 
-const WORKFLOWS_PATH = path.join(process.cwd(), '..', 'config', 'workflows.json');
-const BUILT_IN_WORKFLOWS_DIR = path.join(process.cwd(), '..', 'automation', 'workflows');
-const WORKSPACE_ROOT = path.resolve(process.cwd(), '..');
+const PROJECT_ROOT = path.resolve(__dirname, '../../../');
+const WORKFLOWS_PATH = path.join(PROJECT_ROOT, 'config', 'workflows.json');
+const BUILT_IN_WORKFLOWS_DIR = path.join(PROJECT_ROOT, 'automation', 'workflows');
+const WORKSPACE_ROOT = PROJECT_ROOT;
 const SAFE_PATH_BASES = [WORKSPACE_ROOT, os.homedir()];
 
 export interface WorkflowStep {
@@ -52,6 +55,98 @@ export interface RunWorkflowOptions {
   runId?: string;
   onProgress?: (event: WorkflowProgressEvent) => void;
 }
+
+export interface WorkflowPermissionRequirement {
+  workflowId: string;
+  workflowName: string;
+  stepIndex: number;
+  action: string;
+  commandPattern: string;
+  tier: number;
+  prohibited: boolean;
+  requiresApproval: boolean;
+}
+
+export class WorkflowPermissionError extends Error {
+  public readonly detail: WorkflowPermissionRequirement;
+
+  constructor(detail: WorkflowPermissionRequirement) {
+    super(
+      detail.prohibited
+        ? `Workflow step is prohibited: ${detail.commandPattern}`
+        : `Permission required for workflow step: ${detail.commandPattern}`
+    );
+    this.name = 'WorkflowPermissionError';
+    this.detail = detail;
+  }
+}
+
+const STEP_ACTIONS = [
+  'open_app',
+  'switch_app',
+  'close_app',
+  'open_browser',
+  'open_url',
+  'run_command',
+] as const;
+
+const workflowStepSchema = z.object({
+  action: z.enum(STEP_ACTIONS),
+  target: z.string().min(1).optional(),
+  cmd: z.string().min(1).optional(),
+  url: z.string().url().optional(),
+  args: z.array(z.string()).optional(),
+  delay: z.number().int().min(0).max(120000).optional(),
+  params: z
+    .object({
+      app: z.string().min(1).optional(),
+      target: z.string().min(1).optional(),
+      cmd: z.string().min(1).optional(),
+      command: z.string().min(1).optional(),
+      url: z.string().url().optional(),
+      args: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+
+const workflowBaseSchema = z.object({
+  name: z.string().min(2).max(80),
+  description: z.string().max(280).optional(),
+  steps: z.array(workflowStepSchema).min(1).max(50),
+});
+
+const workflowInputSchema = workflowBaseSchema
+  .superRefine((workflow, ctx) => {
+    for (let i = 0; i < workflow.steps.length; i += 1) {
+      const step = workflow.steps[i];
+      const target = step.target || step.params?.target || step.params?.app;
+      const command = step.cmd || step.params?.cmd || step.params?.command;
+      const url = step.url || step.params?.url;
+
+      if (['open_app', 'switch_app', 'close_app'].includes(step.action) && !target) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Step ${i + 1} (${step.action}) requires target or params.app` });
+      }
+
+      if (['open_browser', 'open_url'].includes(step.action) && !url) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Step ${i + 1} (${step.action}) requires url` });
+      }
+
+      if (step.action === 'run_command' && !command) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Step ${i + 1} (run_command) requires cmd or params.command` });
+      }
+    }
+  });
+
+const persistedWorkflowSchema = workflowBaseSchema.extend({
+  id: z.string().min(1),
+}).superRefine((workflow, ctx) => {
+  const parsed = workflowInputSchema.safeParse(workflow);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue(issue);
+    }
+  }
+});
 
 function parseAutomationCommand(command: string, args?: string[]): { base: string; target?: string } {
   const normalized = command.toLowerCase().trim();
@@ -125,7 +220,12 @@ function loadWorkflows(): Workflow[] {
     for (const file of files) {
       try {
         const content = fs.readFileSync(path.join(BUILT_IN_WORKFLOWS_DIR, file), 'utf-8');
-        workflows.push(JSON.parse(content) as Workflow);
+        const parsed = persistedWorkflowSchema.safeParse(JSON.parse(content));
+        if (!parsed.success) {
+          logger.warn(`Skipping malformed built-in workflow: ${file}`);
+          continue;
+        }
+        workflows.push(parsed.data);
       } catch {
         // Skip malformed workflow files
       }
@@ -136,8 +236,12 @@ function loadWorkflows(): Workflow[] {
   if (fs.existsSync(WORKFLOWS_PATH)) {
     try {
       const content = fs.readFileSync(WORKFLOWS_PATH, 'utf-8');
-      const userWorkflows = JSON.parse(content) as Workflow[];
-      workflows.push(...userWorkflows);
+      const parsed = z.array(persistedWorkflowSchema).safeParse(JSON.parse(content));
+      if (parsed.success) {
+        workflows.push(...parsed.data);
+      } else {
+        logger.warn('Ignoring malformed user workflows config');
+      }
     } catch {
       // Ignore parse errors
     }
@@ -174,6 +278,28 @@ function getStepArgs(step: WorkflowStep): string[] | undefined {
   return step.args || step.params?.args;
 }
 
+function commandPatternFromStep(step: WorkflowStep): string | null {
+  const target = getStepTarget(step);
+  const url = getStepUrl(step);
+  const command = getStepCommand(step);
+
+  switch (step.action) {
+    case 'open_app':
+      return target ? `open_app:${target}` : null;
+    case 'switch_app':
+      return target ? `switch_app:${target}` : null;
+    case 'close_app':
+      return target ? `close_app:${target}` : null;
+    case 'open_browser':
+    case 'open_url':
+      return url ? `open_url:${url}` : null;
+    case 'run_command':
+      return command || null;
+    default:
+      return null;
+  }
+}
+
 export const automationService = {
   async getWorkflows(): Promise<Workflow[]> {
     return loadWorkflows();
@@ -188,6 +314,16 @@ export const automationService = {
     const workflow = workflows.find((w) => normalizeWorkflowId(w.id) === normalizedWorkflowId);
     if (!workflow) {
       throw new Error(`Workflow not found: ${workflowId}`);
+    }
+
+    const validated = persistedWorkflowSchema.safeParse(workflow);
+    if (!validated.success) {
+      throw new Error(`Workflow schema invalid: ${validated.error.issues[0]?.message || 'unknown error'}`);
+    }
+
+    const requirement = await automationService.getWorkflowPermissionRequirement(workflow);
+    if (requirement) {
+      throw new WorkflowPermissionError(requirement);
     }
 
     const runId = options?.runId || uuidv4();
@@ -234,6 +370,46 @@ export const automationService = {
     return { runId, steps: results };
   },
 
+  async getWorkflowPermissionRequirement(workflow: Workflow): Promise<WorkflowPermissionRequirement | null> {
+    for (let stepIndex = 0; stepIndex < workflow.steps.length; stepIndex += 1) {
+      const step = workflow.steps[stepIndex];
+      const commandPattern = commandPatternFromStep(step);
+      if (!commandPattern) continue;
+
+      const tier = permissionService.getCommandTier(commandPattern);
+      if (tier >= 5) {
+        return {
+          workflowId: workflow.id,
+          workflowName: workflow.name,
+          stepIndex,
+          action: step.action,
+          commandPattern,
+          tier,
+          prohibited: true,
+          requiresApproval: false,
+        };
+      }
+
+      if (tier >= 3) {
+        const granted = await permissionService.isPermissionGranted(commandPattern);
+        if (!granted) {
+          return {
+            workflowId: workflow.id,
+            workflowName: workflow.name,
+            stepIndex,
+            action: step.action,
+            commandPattern,
+            tier,
+            prohibited: false,
+            requiresApproval: true,
+          };
+        }
+      }
+    }
+
+    return null;
+  },
+
   async executeStep(step: WorkflowStep): Promise<void> {
     const action = step.action;
     const target = getStepTarget(step);
@@ -247,6 +423,18 @@ export const automationService = {
           throw new Error('Workflow step open_app requires a target or params.app');
         }
         await automationService.openApp(target);
+        break;
+      case 'switch_app':
+        if (!target) {
+          throw new Error('Workflow step switch_app requires a target or params.app');
+        }
+        await automationService.switchApp(target);
+        break;
+      case 'close_app':
+        if (!target) {
+          throw new Error('Workflow step close_app requires a target or params.app');
+        }
+        await automationService.closeApp(target);
         break;
       case 'open_browser':
       case 'open_url':
@@ -280,6 +468,11 @@ export const automationService = {
         await automationService.openApp(parsed.target);
         return { output: `Opened app: ${parsed.target}` };
       }
+      case 'switch_app': {
+        if (!parsed.target) throw new Error('switch_app requires an app name');
+        await automationService.switchApp(parsed.target);
+        return { output: `Switched app focus to: ${parsed.target}` };
+      }
       case 'close_app': {
         if (!parsed.target) throw new Error('close_app requires an app name');
         await automationService.closeApp(parsed.target);
@@ -304,6 +497,57 @@ export const automationService = {
             ? `Found ${matches.length} file(s): ${matches.join(', ')}`
             : `No files found matching: ${parsed.target}`,
         };
+      }
+      case 'copy_file': {
+        if (!parsed.target || !args?.[0]) {
+          throw new Error('copy_file requires source in command target and destination as first arg');
+        }
+        const source = ensureSafePath(parsed.target);
+        const destination = ensureSafePath(args[0]);
+        fs.copyFileSync(source, destination);
+        return { output: `Copied file: ${source} -> ${destination}` };
+      }
+      case 'move_file': {
+        if (!parsed.target || !args?.[0]) {
+          throw new Error('move_file requires source in command target and destination as first arg');
+        }
+        const source = ensureSafePath(parsed.target);
+        const destination = ensureSafePath(args[0]);
+        fs.renameSync(source, destination);
+        return { output: `Moved file: ${source} -> ${destination}` };
+      }
+      case 'delete_file': {
+        if (!parsed.target) throw new Error('delete_file requires a path');
+        const targetPath = ensureSafePath(parsed.target);
+        fs.rmSync(targetPath, { force: true, recursive: false });
+        return { output: `Deleted file: ${targetPath}` };
+      }
+      case 'list_files': {
+        if (!parsed.target) throw new Error('list_files requires a directory path');
+        const dirPath = ensureSafePath(parsed.target);
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+          .slice(0, 100)
+          .map((e) => `${e.isDirectory() ? '[D]' : '[F]'} ${e.name}`);
+        return {
+          output: entries.length > 0
+            ? `Directory entries in ${dirPath}: ${entries.join(', ')}`
+            : `Directory is empty: ${dirPath}`,
+        };
+      }
+      case 'read_file': {
+        if (!parsed.target) throw new Error('read_file requires a file path');
+        const filePath = ensureSafePath(parsed.target);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const preview = content.length > 2000 ? `${content.slice(0, 2000)}...` : content;
+        return { output: `File content (${filePath}): ${preview}` };
+      }
+      case 'write_file': {
+        if (!parsed.target) throw new Error('write_file requires a file path');
+        const filePath = ensureSafePath(parsed.target);
+        const payload = args?.join(' ') ?? '';
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, payload, 'utf-8');
+        return { output: `Wrote ${payload.length} chars to file: ${filePath}` };
       }
       case 'system_info': {
         const si = await import('systeminformation');
@@ -394,6 +638,11 @@ export const automationService = {
     });
   },
 
+  async switchApp(appName: string): Promise<void> {
+    // Cross-platform focus APIs are inconsistent; opening the app is a pragmatic way to foreground it.
+    await automationService.openApp(appName);
+  },
+
   async closeApp(appName: string): Promise<void> {
     const normalized = appName.toLowerCase();
     const { execFile } = await import('child_process');
@@ -434,11 +683,16 @@ export const automationService = {
   },
 
   async saveWorkflow(workflow: Omit<Workflow, 'id'>): Promise<Workflow> {
+    const parsed = workflowInputSchema.safeParse(workflow);
+    if (!parsed.success) {
+      throw new Error(parsed.error.issues[0]?.message || 'Invalid workflow schema');
+    }
+
     const workflows = fs.existsSync(WORKFLOWS_PATH)
       ? JSON.parse(fs.readFileSync(WORKFLOWS_PATH, 'utf-8')) as Workflow[]
       : [];
 
-    const newWorkflow: Workflow = { id: uuidv4(), ...workflow };
+    const newWorkflow: Workflow = { id: uuidv4(), ...parsed.data };
     workflows.push(newWorkflow);
     saveUserWorkflows(workflows);
     return newWorkflow;
@@ -449,5 +703,24 @@ export const automationService = {
     const workflows = JSON.parse(fs.readFileSync(WORKFLOWS_PATH, 'utf-8')) as Workflow[];
     const filtered = workflows.filter((w) => w.id !== id);
     saveUserWorkflows(filtered);
+  },
+
+  async updateWorkflow(id: string, updates: Omit<Workflow, 'id'>): Promise<Workflow> {
+    const parsed = workflowInputSchema.safeParse(updates);
+    if (!parsed.success) {
+      throw new Error(parsed.error.issues[0]?.message || 'Invalid workflow schema');
+    }
+
+    if (!fs.existsSync(WORKFLOWS_PATH)) {
+      throw new Error(`Workflow ${id} not found`);
+    }
+    const workflows = JSON.parse(fs.readFileSync(WORKFLOWS_PATH, 'utf-8')) as Workflow[];
+    const index = workflows.findIndex((w) => w.id === id);
+    if (index === -1) throw new Error(`Workflow ${id} not found`);
+
+    const updated: Workflow = { id, ...parsed.data };
+    workflows[index] = updated;
+    saveUserWorkflows(workflows);
+    return updated;
   },
 };

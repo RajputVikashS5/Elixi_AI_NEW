@@ -192,4 +192,10 @@ export const memoryService = {
       entry.sessionId ?? null
     );
   },
+
+  async getAuditLogs(limit = 100) {
+    return getDb()
+      .prepare('SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?')
+      .all(limit);
+  },
 };
