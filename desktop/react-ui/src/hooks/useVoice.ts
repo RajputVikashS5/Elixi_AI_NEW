@@ -77,6 +77,7 @@ export function useVoice() {
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const lastFrameSentAtRef = useRef<number | null>(null);
+  const lastVolumeUpdateRef = useRef<number>(0);
 
   const teardownAudioCapture = useCallback(() => {
     if (processorRef.current) {
@@ -101,9 +102,10 @@ export function useVoice() {
       void context.close();
     }
 
-    voice.setVolume(0);
+    // Clean up refs - don't call voice.setVolume here to avoid re-render loops
     lastFrameSentAtRef.current = null;
-  }, [voice]);
+    lastVolumeUpdateRef.current = 0;
+  }, []); // No dependencies
 
   useEffect(() => {
     let mounted = true;
@@ -123,7 +125,7 @@ export function useVoice() {
     return () => {
       mounted = false;
     };
-  }, [voice]);
+  }, []); // Remove voice dependency to prevent re-runs on store updates
 
   const startListening = useCallback(async () => {
     if (streamRef.current) {
@@ -155,13 +157,13 @@ export function useVoice() {
         copied.set(inputChannel);
 
         const rms = calculateRms(copied);
+      // Volume update throttled to prevent re-render storms
+      // Only update if 500ms has passed since last update
+      const now = Date.now();
+      if (now - lastVolumeUpdateRef.current > 500) {
         voice.setVolume(Math.min(1, rms * 3.5));
-
-        const downsampled = downsampleTo16k(copied, audioContext.sampleRate);
-        const int16 = float32ToInt16(downsampled);
-        const bytes = new Uint8Array(int16.buffer);
-        const now = performance.now();
-        const cadenceMs = lastFrameSentAtRef.current === null ? 0 : now - lastFrameSentAtRef.current;
+        lastVolumeUpdateRef.current = now;
+      }
 
         if (bytes.byteLength > 0) {
           voice.setDebugMetrics({
@@ -196,16 +198,17 @@ export function useVoice() {
       teardownAudioCapture();
       voice.setStatus('idle');
     }
-  }, [voice, sessionId, emitVoiceStart, sendVoiceAudio, teardownAudioCapture]);
+  }, [sessionId, emitVoiceStart, sendVoiceAudio, teardownAudioCapture]); // Removed voice to prevent re-creates on every store change
 
   const stopListening = useCallback(() => {
     teardownAudioCapture();
+    voice.setVolume(0); // Reset volume when stopping
     voice.reset();
     void voiceService.stopSession().catch(() => {
       // Ignore stop failures in UI.
     });
     emitVoiceStop();
-  }, [voice, emitVoiceStop, teardownAudioCapture]);
+  }, [emitVoiceStop, teardownAudioCapture]); // Removed voice to prevent re-creates on every store change
 
   useEffect(() => {
     return () => {
