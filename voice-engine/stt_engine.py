@@ -16,7 +16,7 @@ import subprocess
 import tempfile
 import wave
 from pathlib import Path
-
+#vkbnbnsdivs
 # Prevent OpenMP duplicate-library crash when ctranslate2 is loaded alongside
 # other packages that also bundle OpenMP (e.g. pywin32 internals).
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
