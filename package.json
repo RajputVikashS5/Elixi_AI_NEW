@@ -13,6 +13,7 @@
     "dev:ui": "npm run dev:ui --workspace=desktop",
     "dev:electron": "wait-on http://localhost:5173 && electron desktop/electron/main.js",
     "build": "npm run build --workspace=desktop && npm run build --workspace=backend",
+    "test:phase12": "powershell -ExecutionPolicy Bypass -File ./scripts/phase12-regression.ps1",
     "start:ai": "cd ai-engine && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
     "start:voice": "cd voice-engine && uvicorn voice_server:app --host 0.0.0.0 --port 8001 --reload"
   },

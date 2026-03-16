@@ -1,7 +1,6 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy } from 'lucide-react';
 
 const SyntaxCodeBlock = React.lazy(() =>
   import('./SyntaxCodeBlock').then((m) => ({ default: m.SyntaxCodeBlock }))
@@ -13,6 +12,67 @@ interface MarkdownRendererProps {
   onCopy: (text: string) => void;
 }
 
+interface DeferredCodeBlockProps {
+  language: string;
+  content: string;
+  copied: boolean;
+  onCopy: (text: string) => void;
+}
+
+const DeferredCodeBlock: React.FC<DeferredCodeBlockProps> = ({ language, content, copied, onCopy }) => {
+  const [expanded, setExpanded] = React.useState(false);
+
+  if (!expanded) {
+    const previewLines = content.split('\n').slice(0, 6).join('\n');
+    const hasMore = content.split('\n').length > 6;
+
+    return (
+      <div className="relative my-2 overflow-hidden rounded-lg border border-elixi-border">
+        <div className="flex items-center justify-between border-b border-elixi-border bg-elixi-bg px-3 py-1.5">
+          <span className="font-mono text-xs text-elixi-muted">{language}</span>
+          <button
+            onClick={() => setExpanded(true)}
+            className="no-drag text-xs text-elixi-primary hover:text-sky-300"
+          >
+            Expand Code
+          </button>
+        </div>
+        <pre className="m-0 overflow-auto bg-[#0f0f1a] p-3 text-xs text-slate-100">
+          {previewLines}
+          {hasMore ? '\n...' : ''}
+        </pre>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative my-2 overflow-hidden rounded-lg border border-elixi-border">
+      <div className="flex items-center justify-between border-b border-elixi-border bg-elixi-bg px-3 py-1.5">
+        <span className="font-mono text-xs text-elixi-muted">{language}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onCopy(content)}
+            className="no-drag text-xs text-elixi-muted hover:text-elixi-text"
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            onClick={() => setExpanded(false)}
+            className="no-drag text-xs text-elixi-muted hover:text-elixi-text"
+          >
+            Collapse
+          </button>
+        </div>
+      </div>
+      <React.Suspense
+        fallback={<pre className="m-0 overflow-auto bg-[#0f0f1a] p-3 text-xs text-slate-100">{content}</pre>}
+      >
+        <SyntaxCodeBlock language={language} content={content} />
+      </React.Suspense>
+    </div>
+  );
+};
+
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, copied, onCopy }) => {
   return (
     <ReactMarkdown
@@ -22,23 +82,12 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cop
           const match = /language-(\w+)/.exec(className || '');
           const isBlock = match !== null;
           return isBlock ? (
-            <div className="relative my-2 rounded-lg overflow-hidden border border-elixi-border">
-              <div className="flex items-center justify-between px-3 py-1.5 bg-elixi-bg border-b border-elixi-border">
-                <span className="text-xs text-elixi-muted font-mono">{match[1]}</span>
-                <button
-                  onClick={() => onCopy(String(children))}
-                  className="text-xs text-elixi-muted hover:text-elixi-text flex items-center gap-1 no-drag"
-                >
-                  {copied ? <Check size={11} /> : <Copy size={11} />}
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-              <React.Suspense
-                fallback={<pre className="m-0 overflow-auto bg-[#0f0f1a] p-3 text-xs text-slate-100">{String(children).replace(/\n$/, '')}</pre>}
-              >
-                <SyntaxCodeBlock language={match[1]} content={String(children).replace(/\n$/, '')} />
-              </React.Suspense>
-            </div>
+            <DeferredCodeBlock
+              language={match[1]}
+              content={String(children).replace(/\n$/, '')}
+              copied={copied}
+              onCopy={onCopy}
+            />
           ) : (
             <code className="bg-elixi-bg px-1.5 py-0.5 rounded text-elixi-accent font-mono text-xs" {...props}>
               {children}

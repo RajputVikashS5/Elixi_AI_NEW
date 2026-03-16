@@ -15,6 +15,7 @@ interface MessageBubbleProps {
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const [copied, setCopied] = React.useState(false);
   const isUser = message.role === 'user';
+  const hasFencedCodeBlock = !isUser && /```[\s\S]*?```/.test(message.content);
 
   const copyToClipboard = async (text: string) => {
     await navigator.clipboard.writeText(text);
@@ -46,13 +47,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <Suspense fallback={<p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>}>
-              <MarkdownRenderer
-                content={message.content}
-                copied={copied}
-                onCopy={copyToClipboard}
-              />
-            </Suspense>
+            hasFencedCodeBlock ? (
+              <Suspense fallback={<p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>}>
+                <MarkdownRenderer
+                  content={message.content}
+                  copied={copied}
+                  onCopy={copyToClipboard}
+                />
+              </Suspense>
+            ) : (
+              <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+            )
           )}
 
           {/* Streaming cursor */}

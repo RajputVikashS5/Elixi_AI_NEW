@@ -236,7 +236,19 @@ function loadWorkflows(): Workflow[] {
   if (fs.existsSync(WORKFLOWS_PATH)) {
     try {
       const content = fs.readFileSync(WORKFLOWS_PATH, 'utf-8');
-      const parsed = z.array(persistedWorkflowSchema).safeParse(JSON.parse(content));
+      const userPayload = JSON.parse(content) as unknown;
+      const rawUserWorkflows = Array.isArray(userPayload)
+        ? userPayload
+        : (userPayload && typeof userPayload === 'object' && Array.isArray((userPayload as { workflows?: unknown[] }).workflows))
+          ? (userPayload as { workflows: unknown[] }).workflows
+          : null;
+
+      if (!rawUserWorkflows) {
+        logger.warn('Ignoring malformed user workflows config');
+        return workflows;
+      }
+
+      const parsed = z.array(persistedWorkflowSchema).safeParse(rawUserWorkflows);
       if (parsed.success) {
         workflows.push(...parsed.data);
       } else {
@@ -255,7 +267,31 @@ function saveUserWorkflows(workflows: Workflow[]): void {
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir, { recursive: true });
   }
-  fs.writeFileSync(WORKFLOWS_PATH, JSON.stringify(workflows, null, 2), 'utf-8');
+  fs.writeFileSync(WORKFLOWS_PATH, JSON.stringify({ workflows }, null, 2), 'utf-8');
+}
+
+function loadUserWorkflowsOnly(): Workflow[] {
+  if (!fs.existsSync(WORKFLOWS_PATH)) return [];
+
+  try {
+    const content = fs.readFileSync(WORKFLOWS_PATH, 'utf-8');
+    const parsedContent = JSON.parse(content) as unknown;
+    const raw = Array.isArray(parsedContent)
+      ? parsedContent
+      : (parsedContent && typeof parsedContent === 'object' && Array.isArray((parsedContent as { workflows?: unknown[] }).workflows))
+        ? (parsedContent as { workflows: unknown[] }).workflows
+        : [];
+
+    const parsed = z.array(persistedWorkflowSchema).safeParse(raw);
+    if (!parsed.success) {
+      logger.warn('Ignoring malformed user workflows config');
+      return [];
+    }
+
+    return parsed.data;
+  } catch {
+    return [];
+  }
 }
 
 function normalizeWorkflowId(id: string): string {
@@ -688,9 +724,7 @@ export const automationService = {
       throw new Error(parsed.error.issues[0]?.message || 'Invalid workflow schema');
     }
 
-    const workflows = fs.existsSync(WORKFLOWS_PATH)
-      ? JSON.parse(fs.readFileSync(WORKFLOWS_PATH, 'utf-8')) as Workflow[]
-      : [];
+    const workflows = loadUserWorkflowsOnly();
 
     const newWorkflow: Workflow = { id: uuidv4(), ...parsed.data };
     workflows.push(newWorkflow);
@@ -700,7 +734,7 @@ export const automationService = {
 
   async deleteWorkflow(id: string): Promise<void> {
     if (!fs.existsSync(WORKFLOWS_PATH)) return;
-    const workflows = JSON.parse(fs.readFileSync(WORKFLOWS_PATH, 'utf-8')) as Workflow[];
+    const workflows = loadUserWorkflowsOnly();
     const filtered = workflows.filter((w) => w.id !== id);
     saveUserWorkflows(filtered);
   },
@@ -714,7 +748,7 @@ export const automationService = {
     if (!fs.existsSync(WORKFLOWS_PATH)) {
       throw new Error(`Workflow ${id} not found`);
     }
-    const workflows = JSON.parse(fs.readFileSync(WORKFLOWS_PATH, 'utf-8')) as Workflow[];
+    const workflows = loadUserWorkflowsOnly();
     const index = workflows.findIndex((w) => w.id === id);
     if (index === -1) throw new Error(`Workflow ${id} not found`);
 

@@ -17,7 +17,7 @@ const ChatPage: React.FC = () => {
   const { messages, sessionId, isLoading, isStreaming, addMessage, newSession } = useChatStore();
   const { personalityMode, ollamaModel } = useSettingsStore();
   const { emotion } = useEmotionStore();
-  const { status: voiceStatus } = useVoiceStore();
+  const { status: voiceStatus, transcript } = useVoiceStore();
   const { sendMessage } = useSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -52,9 +52,14 @@ const ChatPage: React.FC = () => {
     <div className="flex flex-col h-full bg-elixi-bg">
       {/* Chat header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-elixi-border bg-elixi-surface shrink-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3 min-w-0">
           <span className="text-sm font-medium text-elixi-text">Chat</span>
           <VoiceStatusBadge status={voiceStatus} />
+          {transcript ? (
+            <span className="text-xs text-elixi-muted truncate max-w-[320px]" title={transcript}>
+              "{transcript}"
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-1 no-drag">
           <Button variant="ghost" size="sm" onClick={newSession} title="New session">

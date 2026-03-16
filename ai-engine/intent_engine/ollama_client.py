@@ -85,12 +85,32 @@ class OllamaClient:
             "options": {"temperature": 0.7, "num_predict": 1024},
         }
 
+        def _messages_to_prompt(items: list[dict]) -> str:
+            lines: list[str] = []
+            for item in items:
+                role = str(item.get("role", "user")).upper()
+                content = str(item.get("content", "")).strip()
+                if content:
+                    lines.append(f"{role}: {content}")
+            lines.append("ASSISTANT:")
+            return "\n\n".join(lines)
+
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/api/chat",
                 json=payload,
             ) as response:
+                if response.status_code == 404:
+                    logger.warning("Ollama /api/chat unavailable, falling back to /api/generate")
+                    async for token in self.generate(
+                        prompt=_messages_to_prompt(messages),
+                        model=model,
+                        stream=stream,
+                    ):
+                        yield token
+                    return
+
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line.strip():

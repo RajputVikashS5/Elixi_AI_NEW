@@ -104,12 +104,17 @@ export function useSocket() {
       }
     };
 
+    const onVoiceStatus = ({ status }: { status: 'idle' | 'listening' | 'processing' | 'speaking' | 'wake-word' }) => {
+      setStatus(status);
+    };
+
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('chat:token', onChatToken);
     socket.on('chat:complete', onChatComplete);
     socket.on('emotion:update', onEmotionUpdate);
     socket.on('voice:transcript', onVoiceTranscript);
+    socket.on('voice:status', onVoiceStatus);
 
     return () => {
       socket?.off('connect', onConnect);
@@ -118,6 +123,7 @@ export function useSocket() {
       socket?.off('chat:complete', onChatComplete);
       socket?.off('emotion:update', onEmotionUpdate);
       socket?.off('voice:transcript', onVoiceTranscript);
+      socket?.off('voice:status', onVoiceStatus);
     };
   }, [backendUrl, appendToken, updateMessage, setStreaming, updateEmotion, setStatus, setTranscript]);
 
@@ -136,6 +142,14 @@ export function useSocket() {
 
   const sendEmotionSignal = useCallback((wpm: number, errors: number) => {
     socket?.emit('emotion:signal', { typing_wpm: wpm, errors });
+  }, []);
+
+  const startVoiceSession = useCallback((sessionId: string) => {
+    socket?.emit('voice:start', { sessionId });
+  }, []);
+
+  const stopVoiceSession = useCallback(() => {
+    socket?.emit('voice:stop', {});
   }, []);
 
   const runWorkflowWithProgress = useCallback((
@@ -188,6 +202,8 @@ export function useSocket() {
   return {
     sendMessage,
     sendEmotionSignal,
+    startVoiceSession,
+    stopVoiceSession,
     runWorkflowWithProgress,
     isConnected: socket?.connected ?? false,
   };

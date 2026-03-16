@@ -1,16 +1,16 @@
 import { Router } from 'express';
-import { Router as ExpRouter } from 'express';
+import {
+  getVoiceStatus,
+  startVoiceSession,
+  stopVoiceSession,
+  setWakeWordState,
+  synthesizeSpeech,
+} from '../controllers/voice.controller';
 
-export const voiceRoutes: ExpRouter = Router();
+export const voiceRoutes = Router();
 
-// Voice routes are primarily WebSocket-based (handled in voice engine on port 8001)
-// This Router covers HTTP endpoints for voice session management
-
-voiceRoutes.get('/status', (_req, res) => {
-  res.json({ status: 'idle', wakWordActive: false });
-});
-
-voiceRoutes.post('/tts', (_req, res) => {
-  // Proxy TTS requests to voice engine on port 8001
-  res.json({ message: 'TTS handled by voice engine on port 8001' });
-});
+voiceRoutes.get('/status', getVoiceStatus);
+voiceRoutes.post('/start', startVoiceSession);
+voiceRoutes.post('/stop', stopVoiceSession);
+voiceRoutes.post('/wake-word', setWakeWordState);
+voiceRoutes.post('/tts', synthesizeSpeech);

@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import { sanitizeInput } from '../utils/sanitizer';
 import { memoryService } from './memory.service';
 import { automationService, WorkflowPermissionError, WorkflowProgressEvent } from './automation.service';
+import { voiceService } from './voice.service';
 
 const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://localhost:8000';
 
@@ -13,6 +14,7 @@ export function setupSocketHandlers(io: SocketServer): void {
     logger.info(`Socket connected: ${socket.id}`);
 
     socket.on('disconnect', () => {
+      voiceService.stopStreamConnection(socket.id);
       logger.info(`Socket disconnected: ${socket.id}`);
     });
 
@@ -119,6 +121,39 @@ export function setupSocketHandlers(io: SocketServer): void {
         socket.emit('emotion:update', res.data);
       } catch {
         // Silently fail emotion updates
+      }
+    });
+
+    socket.on('voice:start', async (data: { sessionId?: string }) => {
+      try {
+        const sessionId = data?.sessionId || uuidv4();
+        const session = await voiceService.startSession(sessionId);
+
+        await voiceService.startStreamConnection(socket.id, sessionId, {
+          onTranscript: ({ text, final }) => {
+            socket.emit('voice:transcript', { text, final });
+          },
+          onStatus: ({ status }) => {
+            socket.emit('voice:status', { status });
+          },
+          onError: () => {
+            socket.emit('voice:status', { status: 'idle', error: true });
+          },
+        });
+
+        socket.emit('voice:status', { status: session.status });
+      } catch {
+        socket.emit('voice:status', { status: 'idle', error: true });
+      }
+    });
+
+    socket.on('voice:stop', async () => {
+      try {
+        voiceService.stopStreamConnection(socket.id);
+        const session = await voiceService.stopSession();
+        socket.emit('voice:status', { status: session.status });
+      } catch {
+        socket.emit('voice:status', { status: 'idle', error: true });
       }
     });
 
