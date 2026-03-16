@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { MessageSquare, LayoutDashboard, Zap, Brain, Settings, Bot, ShieldCheck, Clock3 } from 'lucide-react';
+import { MessageSquare, LayoutDashboard, Zap, Brain, Mic, Settings, Bot, ShieldCheck, Clock3 } from 'lucide-react';
 import { useEmotionStore } from '../../store/emotionStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import { EmotionIndicator } from '../emotion/EmotionIndicator';
@@ -13,6 +13,7 @@ const navItems = [
   { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { path: '/automation', icon: Zap, label: 'Automation' },
   { path: '/memory', icon: Brain, label: 'Memory' },
+  { path: '/voice', icon: Mic, label: 'Voice' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
 

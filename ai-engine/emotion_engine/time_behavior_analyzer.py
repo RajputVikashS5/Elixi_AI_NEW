@@ -11,11 +11,11 @@ class TimeBehaviorAnalyzer:
             hour = datetime.now().hour
 
         if hour is None:
-            return {"state": "neutral", "confidence": 0.5}
+            return {"source": "time", "state": "neutral", "confidence": 0.0, "weight": 0.0}
         if 0 <= hour <= 5:
-            return {"state": "fatigued", "confidence": 0.7}
+            return {"source": "time", "state": "fatigued", "confidence": 0.74, "weight": 0.75}
         if 6 <= hour <= 11:
-            return {"state": "focused", "confidence": 0.6}
+            return {"source": "time", "state": "focused", "confidence": 0.58, "weight": 0.55}
         if 12 <= hour <= 18:
-            return {"state": "motivated", "confidence": 0.58}
-        return {"state": "neutral", "confidence": 0.55}
+            return {"source": "time", "state": "motivated", "confidence": 0.55, "weight": 0.5}
+        return {"source": "time", "state": "neutral", "confidence": 0.48, "weight": 0.45}

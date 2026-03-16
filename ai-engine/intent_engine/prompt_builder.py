@@ -2,6 +2,7 @@
 
 from typing import Optional
 from models.schemas import EmotionContext
+from emotion_engine.response_modulator import ResponseModulator
 
 _PERSONALITY_TEMPLATES: dict[str, str] = {
     "professional": (
@@ -34,17 +35,22 @@ _DEFAULT_PERSONALITY = "friendly"
 
 
 class PromptBuilder:
+    def __init__(self) -> None:
+        self.response_modulator = ResponseModulator()
+
     def build_system_prompt(
         self,
         personality_mode: str = _DEFAULT_PERSONALITY,
         emotion_context: Optional[EmotionContext] = None,
         injected_memories: Optional[list[str]] = None,
+        proactive_habits: Optional[list[str]] = None,
     ) -> str:
         base = _PERSONALITY_TEMPLATES.get(personality_mode, _PERSONALITY_TEMPLATES[_DEFAULT_PERSONALITY])
         parts = [base]
 
         if emotion_context and emotion_context.state and emotion_context.state != "neutral":
             state = emotion_context.state
+            parts.append(self.response_modulator.style_hint(state))
             if state == "stressed":
                 parts.append("The user appears stressed — keep responses calm and reassuring.")
             elif state == "fatigued":
@@ -59,6 +65,13 @@ class PromptBuilder:
         if injected_memories:
             memories_block = "\n".join(f"- {m}" for m in injected_memories)
             parts.append(f"Relevant context from memory:\n{memories_block}")
+
+        if proactive_habits:
+            habits_block = "\n".join(f"- {item}" for item in proactive_habits)
+            parts.append(
+                "Recurring user patterns you may proactively suggest when useful, without being pushy:\n"
+                f"{habits_block}"
+            )
 
         parts.append("Current platform: Desktop (Windows/macOS/Linux). You have access to automation capabilities.")
         return "\n\n".join(parts)

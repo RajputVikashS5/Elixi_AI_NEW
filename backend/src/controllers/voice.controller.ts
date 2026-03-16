@@ -14,6 +14,12 @@ const wakeSchema = z.object({
   active: z.boolean(),
 });
 
+const voiceSettingsSchema = z.object({
+  rate: z.number().int().min(50).max(400).optional(),
+  volume: z.number().min(0).max(1).optional(),
+  voice_id: z.string().max(256).nullable().optional(),
+});
+
 export async function getVoiceStatus(_req: Request, res: Response, next: NextFunction) {
   try {
     const status = await voiceService.getStatus();
@@ -68,6 +74,46 @@ export async function synthesizeSpeech(req: Request, res: Response, next: NextFu
     }
 
     const data = await voiceService.synthesize(parsed.data.text);
+    return res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getVoiceSettings(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await voiceService.getVoiceSettings();
+    return res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateVoiceSettings(req: Request, res: Response, next: NextFunction) {
+  try {
+    const parsed = voiceSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid settings payload', details: parsed.error.issues });
+    }
+    const data = await voiceService.updateVoiceSettings(parsed.data);
+    return res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function listVoices(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await voiceService.listVoices();
+    return res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getVoiceCapabilities(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = await voiceService.getCapabilities();
     return res.json({ success: true, data });
   } catch (err) {
     next(err);

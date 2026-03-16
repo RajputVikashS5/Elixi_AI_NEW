@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from pydantic import BaseModel
 
 from stt_engine import STTEngine
-from tts_engine import TTSEngine
+from tts_engine import TTSEngine, TTSSettings
 from voice_activity_detector import VoiceActivityDetector
 from wake_word_detector import WakeWordDetector
 
@@ -35,6 +35,12 @@ class TTSRequest(BaseModel):
 
 class WakeWordPayload(BaseModel):
     active: bool
+
+
+class VoiceSettingsPayload(BaseModel):
+    rate: int | None = None        # WPM, 50–400
+    volume: float | None = None    # 0.0–1.0
+    voice_id: str | None = None    # SAPI voice ID or name substring
 
 
 async def broadcast_to_session(session_id: str, payload: dict) -> int:
@@ -307,5 +313,56 @@ async def text_to_speech(payload: TTSRequest):
     return {
         "audioBase64": base64.b64encode(audio).decode("ascii"),
         "mimeType": "audio/wav",
+        "status": "ok",
+    }
+
+
+@app.get("/voice/settings")
+async def get_voice_settings():
+    s = tts_engine._settings
+    return {
+        "rate": s.rate,
+        "volume": s.volume,
+        "voice_id": s.voice_id,
+        "status": "ok",
+    }
+
+
+@app.post("/voice/settings")
+async def update_voice_settings(payload: VoiceSettingsPayload):
+    current = tts_engine._settings
+    new_settings = TTSSettings(
+        rate=payload.rate if payload.rate is not None else current.rate,
+        volume=payload.volume if payload.volume is not None else current.volume,
+        voice_id=payload.voice_id if payload.voice_id is not None else current.voice_id,
+    )
+    tts_engine.apply_settings(new_settings)
+    return {
+        "rate": new_settings.rate,
+        "volume": new_settings.volume,
+        "voice_id": new_settings.voice_id,
+        "status": "ok",
+    }
+
+
+@app.get("/voice/voices")
+async def list_voices():
+    voices = tts_engine.list_voices()
+    return {"voices": voices, "count": len(voices), "status": "ok"}
+
+
+@app.get("/voice/capabilities")
+async def get_capabilities():
+    caps = stt_engine.get_capabilities()
+    return {
+        "stt": caps,
+        "tts": {
+            "pyttsx3": tts_engine._pyttsx3_engine is not None,
+            "windowsFallback": True,
+        },
+        "vad": {
+            "webrtcvad": vad._vad is not None,
+            "rmsFallback": True,
+        },
         "status": "ok",
     }

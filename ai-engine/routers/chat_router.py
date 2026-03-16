@@ -1,7 +1,6 @@
 """Chat router with intent classification and optional SSE streaming."""
 
 import json
-import uuid
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -27,6 +26,23 @@ def _to_sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\\n\\n"
 
 
+def _merge_actions(base_actions: list[dict] | None, proactive_habits: list[dict]) -> list[dict]:
+    merged: list[dict] = list(base_actions or [])
+    seen = {(item.get("type"), item.get("target")) for item in merged if isinstance(item, dict)}
+
+    for suggestion in proactive_habits:
+        action = suggestion.get("action") if isinstance(suggestion, dict) else None
+        if not isinstance(action, dict):
+            continue
+        key = (action.get("type"), action.get("target"))
+        if key in seen:
+            continue
+        merged.append(action)
+        seen.add(key)
+
+    return merged
+
+
 @router.post("/intent", response_model=IntentResponse)
 async def classify_intent(body: IntentRequest) -> IntentResponse:
     intent = intent_classifier.classify(body.message)
@@ -37,15 +53,22 @@ async def classify_intent(body: IntentRequest) -> IntentResponse:
 @router.post("/chat")
 async def chat(body: ChatRequest):
     intent = intent_classifier.classify(body.message)
+    entities = entity_extractor.extract_all(body.message)
     model = body.ollamaModel.value if body.ollamaModel else "llama3"
 
-    context = await memory_router.get_context(body.sessionId, body.message)
+    context = await memory_router.get_context(body.sessionId, body.message, intent.value, entities)
+    memory_router.record_message(body.sessionId, "user", body.message)
+    await memory_router.record_interaction(body.message, intent.value, entities)
+
     memory_lines = [f"{x.get('key')}: {x.get('value')}" for x in context.get("long_facts", [])[:5]]
+    memory_lines.extend(x.get("content", "") for x in context.get("vector_matches", [])[:3])
+    proactive_lines = [item.get("description", "") for item in context.get("proactive_habits", [])[:3]]
 
     system_prompt = prompt_builder.build_system_prompt(
         personality_mode=(body.personalityMode.value if body.personalityMode else "friendly"),
         emotion_context=body.emotionContext,
         injected_memories=memory_lines,
+        proactive_habits=proactive_lines,
     )
 
     history = context.get("short_history", [])
@@ -60,11 +83,13 @@ async def chat(body: ChatRequest):
                     yield _to_sse({"token": token, "done": False})
 
                 parsed = response_parser.parse(full_text)
+                actions = _merge_actions(parsed.get("actions"), context.get("proactive_habits", []))
+                memory_router.record_message(body.sessionId, "assistant", parsed["content"])
                 yield _to_sse(
                     {
                         "content": parsed["content"],
                         "intent": intent.value,
-                        "actions": parsed["actions"],
+                        "actions": actions,
                         "done": True,
                     }
                 )
@@ -84,6 +109,8 @@ async def chat(body: ChatRequest):
             full_text += token
 
         parsed = response_parser.parse(full_text)
-        return ChatResponse(content=parsed["content"], intent=intent.value, actions=parsed["actions"])
+        actions = _merge_actions(parsed.get("actions"), context.get("proactive_habits", []))
+        memory_router.record_message(body.sessionId, "assistant", parsed["content"])
+        return ChatResponse(content=parsed["content"], intent=intent.value, actions=actions)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI generation failed: {str(e)}")

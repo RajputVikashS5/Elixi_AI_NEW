@@ -8,6 +8,32 @@ const DB_PATH = path.resolve(__dirname, '../../../memory/elixi.db');
 
 let db: ReturnType<typeof Database>;
 
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length > 2);
+}
+
+function semanticScore(query: string, content: string, confidence = 1): number {
+  const queryTerms = new Set(tokenize(query));
+  const contentTerms = new Set(tokenize(content));
+  if (queryTerms.size === 0 || contentTerms.size === 0) {
+    return 0;
+  }
+
+  let overlap = 0;
+  for (const term of queryTerms) {
+    if (contentTerms.has(term)) {
+      overlap += 1;
+    }
+  }
+
+  const lexical = overlap / queryTerms.size;
+  return Number((lexical + confidence * 0.15).toFixed(4));
+}
+
 export async function initializeDatabase(): Promise<void> {
   // Ensure memory directory exists
   const memDir = path.dirname(DB_PATH);
@@ -155,12 +181,36 @@ export const memoryService = {
   },
 
   async searchFacts(query: string) {
-    // Simple LIKE search in Phase 1; ChromaDB semantic search added in Phase 4
-    return getDb()
-      .prepare(
-        'SELECT * FROM memories WHERE key LIKE ? OR value LIKE ? LIMIT 20'
-      )
-      .all(`%${query}%`, `%${query}%`);
+    const rows = getDb()
+      .prepare('SELECT * FROM memories ORDER BY updated_at DESC LIMIT 200')
+      .all() as Array<{
+        id: string;
+        category: string;
+        key: string;
+        value: string;
+        confidence: number;
+        source?: string;
+      }>;
+
+    return rows
+      .map((row) => {
+        const content = `${row.key}: ${row.value}`;
+        return {
+          id: row.id,
+          content,
+          score: semanticScore(query, `${row.category} ${content}`, row.confidence ?? 1),
+          metadata: {
+            source: 'memory',
+            category: row.category,
+            key: row.key,
+            confidence: row.confidence,
+            origin: row.source ?? 'user',
+          },
+        };
+      })
+      .filter((item) => item.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 20);
   },
 
   async deleteFact(id: string): Promise<void> {

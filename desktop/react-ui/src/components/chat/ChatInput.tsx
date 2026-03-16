@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Send, Mic, MicOff } from 'lucide-react';
+import { Send, Mic, MicOff, Bug } from 'lucide-react';
 import { useEmotion } from '../../hooks/useEmotion';
 import { useVoice } from '../../hooks/useVoice';
+import { useVoiceStore } from '../../store/voiceStore';
 import { VoiceWaveform } from '../voice/VoiceWaveform';
 import { clsx } from 'clsx';
 
@@ -20,8 +21,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { recordKeystroke } = useEmotion();
   const { status, volume, startListening, stopListening } = useVoice();
+  const { debugVisible, debugMetrics, setDebugVisible } = useVoiceStore();
   const keyCountRef = useRef(0);
   const errorCountRef = useRef(0);
+  const isDev = import.meta.env.DEV;
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
@@ -123,6 +126,51 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <Send size={16} />
         </button>
       </div>
+
+      {isDev ? (
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <button
+            onClick={() => setDebugVisible(!debugVisible)}
+            className={clsx(
+              'no-drag inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] transition-colors',
+              debugVisible
+                ? 'border-amber-400/50 text-amber-300 bg-amber-400/10'
+                : 'border-elixi-border text-elixi-muted hover:text-elixi-text'
+            )}
+            aria-label={debugVisible ? 'Hide voice debug' : 'Show voice debug'}
+            type="button"
+          >
+            <Bug size={12} />
+            Voice Debug
+          </button>
+
+          {debugVisible ? (
+            <div className="text-[11px] text-elixi-muted/70">
+              Live capture diagnostics
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {isDev && debugVisible ? (
+        <div className="mt-2 grid grid-cols-3 gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-[11px] text-elixi-text">
+          <div>
+            <div className="text-elixi-muted/70">Sample Rate</div>
+            <div>{debugMetrics.sampleRate || 0} Hz</div>
+          </div>
+          <div>
+            <div className="text-elixi-muted/70">Frame Size</div>
+            <div>{debugMetrics.frameBytes || 0} bytes</div>
+          </div>
+          <div>
+            <div className="text-elixi-muted/70">Send Cadence</div>
+            <div>
+              {debugMetrics.cadenceMs || 0} ms
+              {debugMetrics.cadenceMs > 0 ? ` (${(1000 / debugMetrics.cadenceMs).toFixed(1)} fps)` : ''}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <p className="mt-1.5 text-center text-xs text-elixi-muted/60">
         Press Enter to send · Shift+Enter for new line

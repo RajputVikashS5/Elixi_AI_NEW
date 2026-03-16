@@ -212,4 +212,24 @@ export const voiceService = {
     const res = await axios.post(`${VOICE_ENGINE_URL}/voice/tts`, payload, { timeout: 15000 });
     return res.data;
   },
+
+  async getVoiceSettings() {
+    const res = await axios.get(`${VOICE_ENGINE_URL}/voice/settings`, { timeout: 5000 });
+    return res.data;
+  },
+
+  async updateVoiceSettings(settings: { rate?: number; volume?: number; voice_id?: string | null }) {
+    const res = await axios.post(`${VOICE_ENGINE_URL}/voice/settings`, settings, { timeout: 5000 });
+    return res.data;
+  },
+
+  async listVoices() {
+    const res = await axios.get(`${VOICE_ENGINE_URL}/voice/voices`, { timeout: 10000 });
+    return res.data;
+  },
+
+  async getCapabilities() {
+    const res = await axios.get(`${VOICE_ENGINE_URL}/voice/capabilities`, { timeout: 5000 });
+    return res.data;
+  },
 };

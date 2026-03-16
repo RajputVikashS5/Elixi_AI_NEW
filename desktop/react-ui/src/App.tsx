@@ -12,6 +12,7 @@ const ChatPage = lazy(() => import('./pages/ChatPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const AutomationPage = lazy(() => import('./pages/AutomationPage'));
 const MemoryPage = lazy(() => import('./pages/MemoryPage'));
+const VoicePage = lazy(() => import('./pages/VoicePage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 
 const App: React.FC = () => {
@@ -57,6 +58,7 @@ const App: React.FC = () => {
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/automation" element={<AutomationPage />} />
                 <Route path="/memory" element={<MemoryPage />} />
+                <Route path="/voice" element={<VoicePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
             </Suspense>

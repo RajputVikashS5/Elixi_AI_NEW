@@ -152,6 +152,16 @@ export function useSocket() {
     socket?.emit('voice:stop', {});
   }, []);
 
+  const sendVoiceAudio = useCallback((audioBase64: string, format: 'pcm_s16le' | 'wav', sampleRate = 16000) => {
+    if (!audioBase64) return;
+    socket?.emit('voice:audio', {
+      audioBase64,
+      format,
+      sampleRate,
+      channels: 1,
+    });
+  }, []);
+
   const runWorkflowWithProgress = useCallback((
     workflowId: string,
     onProgress?: (event: AutomationProgressEvent) => void,
@@ -204,6 +214,7 @@ export function useSocket() {
     sendEmotionSignal,
     startVoiceSession,
     stopVoiceSession,
+    sendVoiceAudio,
     runWorkflowWithProgress,
     isConnected: socket?.connected ?? false,
   };

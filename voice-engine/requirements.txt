@@ -1,3 +1,7 @@
 fastapi==0.110.3
 uvicorn[standard]==0.29.0
 pydantic==2.7.1
+faster-whisper>=1.0.3
+vosk>=0.3.45
+webrtcvad-wheels>=2.0.10
+pyttsx3>=2.90

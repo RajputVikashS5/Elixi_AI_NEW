@@ -5,6 +5,10 @@ import {
   stopVoiceSession,
   setWakeWordState,
   synthesizeSpeech,
+  getVoiceSettings,
+  updateVoiceSettings,
+  listVoices,
+  getVoiceCapabilities,
 } from '../controllers/voice.controller';
 
 export const voiceRoutes = Router();
@@ -14,3 +18,7 @@ voiceRoutes.post('/start', startVoiceSession);
 voiceRoutes.post('/stop', stopVoiceSession);
 voiceRoutes.post('/wake-word', setWakeWordState);
 voiceRoutes.post('/tts', synthesizeSpeech);
+voiceRoutes.get('/settings', getVoiceSettings);
+voiceRoutes.post('/settings', updateVoiceSettings);
+voiceRoutes.get('/voices', listVoices);
+voiceRoutes.get('/capabilities', getVoiceCapabilities);

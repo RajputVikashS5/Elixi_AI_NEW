@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSettingsStore, PersonalityMode, OllamaModel } from '../store/settingsStore';
+import { voiceService, VoiceEntry } from '../services/voiceService';
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div className="space-y-3">
@@ -51,8 +52,60 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = (
   </button>
 );
 
+const Slider: React.FC<{
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  onCommit?: (v: number) => void;
+  formatLabel?: (v: number) => string;
+}> = ({ value, min, max, step, onChange, onCommit, formatLabel }) => (
+  <div className="flex items-center gap-3">
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      onMouseUp={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
+      onTouchEnd={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
+      className="w-32 accent-[var(--color-elixi-primary,#22d3ee)] no-drag"
+    />
+    <span className="w-12 text-right text-xs text-elixi-muted tabular-nums">
+      {formatLabel ? formatLabel(value) : value}
+    </span>
+  </div>
+);
+
 const SettingsPage: React.FC = () => {
   const settings = useSettingsStore();
+  const [voices, setVoices] = useState<VoiceEntry[]>([]);
+
+  // Load available SAPI voices from voice engine
+  useEffect(() => {
+    voiceService
+      .listVoices()
+      .then((res) => {
+        if (res?.success && res.data?.voices) {
+          setVoices(res.data.voices);
+        }
+      })
+      .catch(() => {
+        // Voice engine offline — keep empty list
+      });
+  }, []);
+
+  // Push TTS settings to voice engine whenever they change
+  const commitTtsSettings = useCallback(
+    (patch: Partial<{ rate: number; volume: number; voice_id: string | null }>) => {
+      voiceService.updateSettings(patch).catch(() => {
+        // Tolerate engine being offline
+      });
+    },
+    [],
+  );
 
   const personalityOptions: { value: PersonalityMode; label: string }[] = [
     { value: 'professional', label: 'Professional' },
@@ -67,6 +120,11 @@ const SettingsPage: React.FC = () => {
     { value: 'llama3:8b', label: 'Llama 3 8B' },
     { value: 'mistral', label: 'Mistral 7B' },
     { value: 'mistral:7b', label: 'Mistral 7B (explicit)' },
+  ];
+
+  const voiceOptions = [
+    { value: '', label: 'System default' },
+    ...voices.map((v) => ({ value: v.id, label: v.name })),
   ];
 
   return (
@@ -119,6 +177,40 @@ const SettingsPage: React.FC = () => {
         <SettingRow label="Wake Word" description="Listen for 'Hey ELIXI' continuously">
           <Toggle checked={settings.wakeWordEnabled} onChange={settings.setWakeWordEnabled} />
         </SettingRow>
+        <SettingRow label="TTS Speed" description="Speaking rate in words per minute">
+          <Slider
+            value={settings.ttsSpeed}
+            min={50}
+            max={400}
+            step={25}
+            onChange={settings.setTtsSpeed}
+            onCommit={(v) => commitTtsSettings({ rate: v })}
+            formatLabel={(v) => `${v} wpm`}
+          />
+        </SettingRow>
+        <SettingRow label="TTS Volume" description="Output volume for spoken responses">
+          <Slider
+            value={settings.ttsVolume}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={settings.setTtsVolume}
+            onCommit={(v) => commitTtsSettings({ volume: v })}
+            formatLabel={(v) => `${Math.round(v * 100)}%`}
+          />
+        </SettingRow>
+        {voiceOptions.length > 1 && (
+          <SettingRow label="TTS Voice" description="SAPI5 voice for text-to-speech output">
+            <Select
+              value={settings.ttsVoiceId}
+              onChange={(v) => {
+                settings.setTtsVoiceId(v);
+                commitTtsSettings({ voice_id: v || null });
+              }}
+              options={voiceOptions}
+            />
+          </SettingRow>
+        )}
       </Section>
 
       <Section title="Accessibility">
