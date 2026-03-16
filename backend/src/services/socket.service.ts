@@ -54,6 +54,8 @@ export function setupSocketHandlers(io: SocketServer): void {
         );
 
         let fullContent = '';
+        let finalActions: unknown[] | undefined;
+        let finalIntent: string | undefined;
 
         response.data.on('data', (chunk: Buffer) => {
           const text = chunk.toString();
@@ -64,7 +66,16 @@ export function setupSocketHandlers(io: SocketServer): void {
             if (payload === '[DONE]') continue;
             try {
               const parsed = JSON.parse(payload);
-              const token = parsed.token || parsed.content || '';
+              if (parsed.done) {
+                finalActions = parsed.actions;
+                finalIntent = parsed.intent;
+                if (!fullContent && typeof parsed.content === 'string') {
+                  fullContent = parsed.content;
+                }
+                continue;
+              }
+
+              const token = parsed.token || '';
               if (token) {
                 fullContent += token;
                 socket.emit('chat:token', { token });
@@ -82,7 +93,8 @@ export function setupSocketHandlers(io: SocketServer): void {
         response.data.on('end', async () => {
           socket.emit('chat:complete', {
             messageId: assistantMsgId,
-            intent: 'chat.general',
+            intent: finalIntent || 'chat.general',
+            actions: finalActions,
           });
 
           // Store assistant message
@@ -152,6 +164,40 @@ export function setupSocketHandlers(io: SocketServer): void {
         voiceService.stopStreamConnection(socket.id);
         const session = await voiceService.stopSession();
         socket.emit('voice:status', { status: session.status });
+      } catch {
+        socket.emit('voice:status', { status: 'idle', error: true });
+      }
+    });
+
+    socket.on('voice:audio', (data: { audioBase64?: string; format?: string; sampleRate?: number; channels?: number }) => {
+      const audioBase64 = data?.audioBase64;
+      if (!audioBase64) {
+        return;
+      }
+
+      try {
+        const frame = Buffer.from(audioBase64, 'base64');
+        if (!frame.length) {
+          return;
+        }
+
+        const format = data?.format === 'wav' ? 'wav' : 'pcm_s16le';
+        const sampleRate = Number.isFinite(data?.sampleRate) && (data?.sampleRate ?? 0) > 0
+          ? Number(data?.sampleRate)
+          : 16000;
+        const channels = Number.isFinite(data?.channels) && (data?.channels ?? 0) > 0
+          ? Number(data?.channels)
+          : 1;
+
+        const forwarded = voiceService.sendAudioFrame(socket.id, {
+          audioBase64,
+          format,
+          sampleRate,
+          channels,
+        });
+        if (!forwarded) {
+          socket.emit('voice:status', { status: 'idle', error: true });
+        }
       } catch {
         socket.emit('voice:status', { status: 'idle', error: true });
       }

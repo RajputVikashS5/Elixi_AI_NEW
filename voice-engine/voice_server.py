@@ -1,16 +1,25 @@
 """Voice engine API and streaming bridge endpoints."""
 
+import base64
+import io
 import json
+import wave
 from collections import defaultdict
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from stt_engine import STTEngine
+from tts_engine import TTSEngine
+from voice_activity_detector import VoiceActivityDetector
+from wake_word_detector import WakeWordDetector
 
 app = FastAPI(title="ELIXI Voice Engine", version="0.2.0")
 
 stt_engine = STTEngine()
+tts_engine = TTSEngine()
+vad = VoiceActivityDetector()
+wake_word_detector = WakeWordDetector()
 session_connections: dict[str, set[WebSocket]] = defaultdict(set)
 
 
@@ -18,6 +27,14 @@ class TranscriptPayload(BaseModel):
     sessionId: str
     text: str
     final: bool = True
+
+
+class TTSRequest(BaseModel):
+    text: str
+
+
+class WakeWordPayload(BaseModel):
+    active: bool
 
 
 async def broadcast_to_session(session_id: str, payload: dict) -> int:
@@ -52,7 +69,24 @@ async def voice_status():
         "status": "ok",
         "activeSessions": len(session_connections),
         "activeConnections": sum(len(sockets) for sockets in session_connections.values()),
+        "wakeWordActive": wake_word_detector.running,
+        "lastWakeWord": wake_word_detector.last_detected_phrase,
+        "offline": {
+            "stt": True,
+            "tts": True,
+            "vad": True,
+            "wakeWord": True,
+        },
     }
+
+
+@app.post("/voice/wake-word")
+async def set_wake_word(payload: WakeWordPayload):
+    if payload.active:
+        state = wake_word_detector.start()
+    else:
+        state = wake_word_detector.stop()
+    return {"status": "ok", **state}
 
 
 @app.post("/voice/transcript")
@@ -72,12 +106,101 @@ async def push_transcript(payload: TranscriptPayload):
     }
 
 
+def _process_transcript(session_id: str, transcript: str, final: bool) -> list[dict]:
+    cleaned = transcript.strip()
+    if not cleaned:
+        return []
+
+    if wake_word_detector.running:
+        detection = wake_word_detector.detect_text(cleaned)
+        if not detection["detected"]:
+            return [{"type": "status", "sessionId": session_id, "status": "wake-word"}]
+
+        events = [
+            {
+                "type": "wake-word",
+                "sessionId": session_id,
+                "matchedPhrase": detection["matchedPhrase"],
+            }
+        ]
+        command = detection["command"]
+        if command:
+            events.append(
+                {
+                    "type": "transcript",
+                    "sessionId": session_id,
+                    "text": command,
+                    "final": final,
+                }
+            )
+        else:
+            events.append({"type": "status", "sessionId": session_id, "status": "listening"})
+        return events
+
+    return [
+        {
+            "type": "transcript",
+            "sessionId": session_id,
+            "text": cleaned,
+            "final": final,
+        }
+    ]
+
+
+def _pcm_s16le_to_wav(audio_bytes: bytes, sample_rate: int, channels: int) -> bytes:
+    if not audio_bytes:
+        return b""
+
+    rate = sample_rate if sample_rate > 0 else 16000
+    ch = channels if channels > 0 else 1
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(ch)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(rate)
+        wav_file.writeframes(audio_bytes)
+    return buffer.getvalue()
+
+
+def _extract_audio_payload(payload: dict) -> bytes:
+    audio_base64 = payload.get("audioBase64")
+    if not isinstance(audio_base64, str) or not audio_base64:
+        return b""
+
+    try:
+        audio_bytes = base64.b64decode(audio_base64)
+    except (ValueError, TypeError):
+        return b""
+
+    if not audio_bytes:
+        return b""
+
+    fmt = str(payload.get("format") or "pcm_s16le").lower()
+    sample_rate = int(payload.get("sampleRate") or 16000)
+    channels = int(payload.get("channels") or 1)
+
+    if fmt in {"wav", "audio/wav"}:
+        return audio_bytes
+
+    if fmt in {"pcm_s16le", "pcm"}:
+        return _pcm_s16le_to_wav(audio_bytes, sample_rate, channels)
+
+    return b""
+
+
 @app.websocket("/voice/stream")
 async def voice_stream(websocket: WebSocket, sessionId: str = Query(...)):
     await websocket.accept()
     session_connections[sessionId].add(websocket)
 
-    await websocket.send_json({"type": "status", "sessionId": sessionId, "status": "listening"})
+    await websocket.send_json(
+        {
+            "type": "status",
+            "sessionId": sessionId,
+            "status": "wake-word" if wake_word_detector.running else "listening",
+        }
+    )
 
     try:
         while True:
@@ -101,28 +224,62 @@ async def voice_stream(websocket: WebSocket, sessionId: str = Query(...)):
                     await websocket.send_json({"type": "status", "sessionId": sessionId, "status": "idle"})
                     break
 
+                if payload_type == "wake-word":
+                    if bool(payload.get("active", True)):
+                        wake_word_detector.start()
+                        await websocket.send_json({"type": "status", "sessionId": sessionId, "status": "wake-word"})
+                    else:
+                        wake_word_detector.stop()
+                        await websocket.send_json({"type": "status", "sessionId": sessionId, "status": "listening"})
+                    continue
+
                 if payload_type == "transcript":
+                    for event in _process_transcript(
+                        sessionId,
+                        payload.get("text", ""),
+                        bool(payload.get("final", True)),
+                    ):
+                        await websocket.send_json(event)
+                    continue
+
+                if payload_type == "audio":
+                    normalized_audio = _extract_audio_payload(payload)
+                    if not normalized_audio:
+                        continue
+
+                    analysis = vad.analyze(normalized_audio)
+                    if not analysis["speech_detected"]:
+                        await websocket.send_json(
+                            {
+                                "type": "status",
+                                "sessionId": sessionId,
+                                "status": "wake-word" if wake_word_detector.running else "listening",
+                            }
+                        )
+                        continue
+
+                    transcript = stt_engine.transcribe(normalized_audio)
+                    if transcript:
+                        for event in _process_transcript(sessionId, transcript, True):
+                            await websocket.send_json(event)
+                    continue
+
+            if bytes_data:
+                analysis = vad.analyze(bytes_data)
+                if not analysis["speech_detected"]:
                     await websocket.send_json(
                         {
-                            "type": "transcript",
+                            "type": "status",
                             "sessionId": sessionId,
-                            "text": payload.get("text", ""),
-                            "final": bool(payload.get("final", True)),
+                            "status": "wake-word" if wake_word_detector.running else "listening",
                         }
                     )
                     continue
 
-            if bytes_data:
                 transcript = stt_engine.transcribe(bytes_data)
                 if transcript:
-                    await websocket.send_json(
-                        {
-                            "type": "transcript",
-                            "sessionId": sessionId,
-                            "text": transcript,
-                            "final": True,
-                        }
-                    )
+                    for event in _process_transcript(sessionId, transcript, True):
+                        await websocket.send_json(event)
     except WebSocketDisconnect:
         pass
     finally:
@@ -134,11 +291,21 @@ async def voice_stream(websocket: WebSocket, sessionId: str = Query(...)):
 
 
 @app.post("/stt")
-async def speech_to_text():
-    return {"transcript": "", "status": "stub"}
+async def speech_to_text(request: Request):
+    audio_bytes = await request.body()
+    transcript = stt_engine.transcribe(audio_bytes)
+    return {"transcript": transcript, "status": "ok" if transcript else "empty"}
 
 
 @app.post("/voice/tts")
 @app.post("/tts")
-async def text_to_speech():
-    return {"audio": None, "status": "stub"}
+async def text_to_speech(payload: TTSRequest):
+    audio = tts_engine.synthesize(payload.text)
+    if not audio:
+        raise HTTPException(status_code=502, detail="Failed to synthesize audio")
+
+    return {
+        "audioBase64": base64.b64encode(audio).decode("ascii"),
+        "mimeType": "audio/wav",
+        "status": "ok",
+    }

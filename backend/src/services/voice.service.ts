@@ -34,6 +34,13 @@ interface VoiceStreamHandlers {
   onError: (payload: { message: string }) => void;
 }
 
+interface VoiceAudioFrame {
+  audioBase64: string;
+  format: 'pcm_s16le' | 'wav';
+  sampleRate: number;
+  channels: number;
+}
+
 const streamConnections = new Map<string, WebSocket>();
 
 function parseStreamPayload(data: WebSocket.RawData): VoiceStreamMessage | null {
@@ -48,24 +55,35 @@ function parseStreamPayload(data: WebSocket.RawData): VoiceStreamMessage | null 
 export const voiceService = {
   async getStatus() {
     let engineHealthy = false;
+    let engineState: Record<string, unknown> = {};
 
     try {
       await axios.get(`${VOICE_ENGINE_URL}/health`, { timeout: 3000 });
+      const statusRes = await axios.get(`${VOICE_ENGINE_URL}/voice/status`, { timeout: 3000 });
+      engineState = statusRes.data;
       engineHealthy = true;
     } catch {
       engineHealthy = false;
     }
 
+    if (typeof engineState.wakeWordActive === 'boolean') {
+      state.wakeWordActive = Boolean(engineState.wakeWordActive);
+      if (!state.active) {
+        state.status = state.wakeWordActive ? 'wake-word' : 'idle';
+      }
+    }
+
     return {
       ...state,
       engineHealthy,
+      engineState,
     };
   },
 
   async startSession(sessionId: string) {
     state.active = true;
     state.sessionId = sessionId;
-    state.status = 'listening';
+    state.status = state.wakeWordActive ? 'wake-word' : 'listening';
     return { ...state };
   },
 
@@ -98,7 +116,7 @@ export const voiceService = {
     streamConnections.set(clientId, ws);
 
     ws.on('open', () => {
-      handlers.onStatus({ status: 'listening' });
+      handlers.onStatus({ status: state.wakeWordActive ? 'wake-word' : 'listening' });
     });
 
     ws.on('message', (rawData) => {
@@ -151,10 +169,40 @@ export const voiceService = {
     streamConnections.delete(clientId);
   },
 
+  sendAudioFrame(clientId: string, frame: VoiceAudioFrame) {
+    const ws = streamConnections.get(clientId);
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+
+    try {
+      ws.send(JSON.stringify({
+        type: 'audio',
+        audioBase64: frame.audioBase64,
+        format: frame.format,
+        sampleRate: frame.sampleRate,
+        channels: frame.channels,
+      }));
+      return true;
+    } catch (error) {
+      logger.warn('Failed to forward voice audio frame:', error);
+      return false;
+    }
+  },
+
   async setWakeWord(active: boolean) {
     state.wakeWordActive = active;
+    try {
+      await axios.post(`${VOICE_ENGINE_URL}/voice/wake-word`, { active }, { timeout: 5000 });
+    } catch (error) {
+      logger.warn('Voice wake-word sync failed:', error);
+    }
     if (!state.active) {
       state.status = active ? 'wake-word' : 'idle';
+    } else if (active) {
+      state.status = 'wake-word';
+    } else if (state.status === 'wake-word') {
+      state.status = 'listening';
     }
     return { ...state };
   },
