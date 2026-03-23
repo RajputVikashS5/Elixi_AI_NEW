@@ -157,13 +157,18 @@ export function useVoice() {
         copied.set(inputChannel);
 
         const rms = calculateRms(copied);
-      // Volume update throttled to prevent re-render storms
-      // Only update if 500ms has passed since last update
-      const now = Date.now();
-      if (now - lastVolumeUpdateRef.current > 500) {
-        voice.setVolume(Math.min(1, rms * 3.5));
-        lastVolumeUpdateRef.current = now;
-      }
+        const now = Date.now();
+
+        // Volume update throttled to prevent re-render storms.
+        if (now - lastVolumeUpdateRef.current > 500) {
+          voice.setVolume(Math.min(1, rms * 3.5));
+          lastVolumeUpdateRef.current = now;
+        }
+
+        const downsampled = downsampleTo16k(copied, audioContext.sampleRate);
+        const pcm16 = float32ToInt16(downsampled);
+        const bytes = new Uint8Array(pcm16.buffer);
+        const cadenceMs = lastFrameSentAtRef.current ? now - lastFrameSentAtRef.current : 0;
 
         if (bytes.byteLength > 0) {
           voice.setDebugMetrics({

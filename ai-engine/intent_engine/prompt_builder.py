@@ -74,6 +74,15 @@ class PromptBuilder:
             )
 
         parts.append("Current platform: Desktop (Windows/macOS/Linux). You have access to automation capabilities.")
+        parts.append(
+            "You are ELIXI, a calm voice-first assistant. Keep replies short, natural, and actionable. "
+            "Ask a brief clarification question if user intent is ambiguous."
+        )
+        parts.append(
+            "Return JSON only with this exact shape: "
+            '{"intent":"","action":"","entities":{},"confidence":0.0,"response":""}. '
+            "Use confidence between 0.0 and 1.0."
+        )
         return "\n\n".join(parts)
 
     def build_messages(

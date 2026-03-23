@@ -1,8 +1,9 @@
 """Parses raw LLM output and extracts structured actions."""
 
+import json
 import re
 import logging
-from typing import Optional
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,59 @@ class ResponseParser:
         """Remove [ACTION:...] markers from the final response text."""
         return _ACTION_PATTERN.sub("", text).strip()
 
-    def parse(self, raw: str) -> dict:
+    def _extract_json_object(self, text: str) -> Optional[dict[str, Any]]:
+        stripped = text.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                payload = json.loads(stripped)
+                if isinstance(payload, dict):
+                    return payload
+            except json.JSONDecodeError:
+                pass
+
+        # Try to locate first JSON object in freeform text/code-fences.
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+
+        candidate = stripped[start:end + 1]
+        try:
+            payload = json.loads(candidate)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            return None
+        return None
+
+    def parse(
+        self,
+        raw: str,
+        fallback_intent: Optional[str] = None,
+        fallback_entities: Optional[dict] = None,
+    ) -> dict:
         actions = self.extract_actions(raw)
         clean_text = self.strip_action_markers(raw)
+
+        parsed_json = self._extract_json_object(clean_text)
+        if parsed_json:
+            response = str(parsed_json.get("response", "")).strip() or clean_text
+            return {
+                "content": response,
+                "response": response,
+                "intent": str(parsed_json.get("intent") or fallback_intent or "chat.general"),
+                "action": str(parsed_json.get("action") or "respond"),
+                "entities": parsed_json.get("entities") if isinstance(parsed_json.get("entities"), dict) else (fallback_entities or {}),
+                "confidence": float(parsed_json.get("confidence", 0.75)),
+                "actions": actions,
+            }
+
         return {
             "content": clean_text,
+            "response": clean_text,
+            "intent": fallback_intent or "chat.general",
+            "action": "respond",
+            "entities": fallback_entities or {},
+            "confidence": 0.7,
             "actions": actions,
         }

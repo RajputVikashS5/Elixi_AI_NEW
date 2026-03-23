@@ -23,7 +23,7 @@ memory_router = MemoryRouter()
 
 
 def _to_sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload)}\\n\\n"
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 def _merge_actions(base_actions: list[dict] | None, proactive_habits: list[dict]) -> list[dict]:
@@ -47,16 +47,27 @@ def _merge_actions(base_actions: list[dict] | None, proactive_habits: list[dict]
 async def classify_intent(body: IntentRequest) -> IntentResponse:
     intent = intent_classifier.classify(body.message)
     entities = entity_extractor.extract_all(body.message)
-    return IntentResponse(intent=intent.value, confidence=0.75, entities=entities)
+    confidence = intent_classifier.confidence_for(body.message, intent)
+    return IntentResponse(intent=intent.value, confidence=confidence, entities=entities)
 
 
 @router.post("/chat")
 async def chat(body: ChatRequest):
     intent = intent_classifier.classify(body.message)
+    intent_confidence = intent_classifier.confidence_for(body.message, intent)
     entities = entity_extractor.extract_all(body.message)
     model = body.ollamaModel.value if body.ollamaModel else "llama3"
 
     context = await memory_router.get_context(body.sessionId, body.message, intent.value, entities)
+
+    if intent.value in {"action_cancel", "action_repeat"}:
+        last_user_command = next(
+            (m.get("content") for m in reversed(context.get("short_history", [])) if m.get("role") == "user"),
+            None,
+        )
+        if last_user_command:
+            entities["refers_to"] = last_user_command
+
     memory_router.record_message(body.sessionId, "user", body.message)
     await memory_router.record_interaction(body.message, intent.value, entities)
 
@@ -82,13 +93,21 @@ async def chat(body: ChatRequest):
                     full_text += token
                     yield _to_sse({"token": token, "done": False})
 
-                parsed = response_parser.parse(full_text)
+                parsed = response_parser.parse(
+                    full_text,
+                    fallback_intent=intent.value,
+                    fallback_entities=entities,
+                )
                 actions = _merge_actions(parsed.get("actions"), context.get("proactive_habits", []))
                 memory_router.record_message(body.sessionId, "assistant", parsed["content"])
                 yield _to_sse(
                     {
                         "content": parsed["content"],
-                        "intent": intent.value,
+                        "response": parsed.get("response", parsed["content"]),
+                        "intent": parsed.get("intent", intent.value),
+                        "action": parsed.get("action", "respond"),
+                        "entities": parsed.get("entities", entities),
+                        "confidence": float(parsed.get("confidence", intent_confidence)),
                         "actions": actions,
                         "done": True,
                     }
@@ -108,9 +127,21 @@ async def chat(body: ChatRequest):
         async for token in ollama_client.chat(messages=messages, model=model, stream=True):
             full_text += token
 
-        parsed = response_parser.parse(full_text)
+        parsed = response_parser.parse(
+            full_text,
+            fallback_intent=intent.value,
+            fallback_entities=entities,
+        )
         actions = _merge_actions(parsed.get("actions"), context.get("proactive_habits", []))
         memory_router.record_message(body.sessionId, "assistant", parsed["content"])
-        return ChatResponse(content=parsed["content"], intent=intent.value, actions=actions)
+        return ChatResponse(
+            content=parsed["content"],
+            response=parsed.get("response", parsed["content"]),
+            intent=parsed.get("intent", intent.value),
+            action=parsed.get("action", "respond"),
+            entities=parsed.get("entities", entities),
+            confidence=float(parsed.get("confidence", intent_confidence)),
+            actions=actions,
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI generation failed: {str(e)}")

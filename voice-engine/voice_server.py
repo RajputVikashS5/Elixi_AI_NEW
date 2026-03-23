@@ -21,6 +21,7 @@ tts_engine = TTSEngine()
 vad = VoiceActivityDetector()
 wake_word_detector = WakeWordDetector()
 session_connections: dict[str, set[WebSocket]] = defaultdict(set)
+wake_word_detector.start()
 
 
 class TranscriptPayload(BaseModel):
@@ -119,7 +120,7 @@ def _process_transcript(session_id: str, transcript: str, final: bool) -> list[d
 
     if wake_word_detector.running:
         detection = wake_word_detector.detect_text(cleaned)
-        if not detection["detected"]:
+        if (not detection["detected"]) or (detection.get("confidence", 0.0) < wake_word_detector.min_confidence):
             return [{"type": "status", "sessionId": session_id, "status": "wake-word"}]
 
         events = [

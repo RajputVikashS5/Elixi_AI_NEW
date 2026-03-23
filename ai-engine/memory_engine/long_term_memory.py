@@ -86,10 +86,17 @@ async def init_database() -> None:
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS habit_summaries (
+                id TEXT PRIMARY KEY,
+                summarized_at TEXT NOT NULL,
+                payload TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
             CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
             CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);
             CREATE INDEX IF NOT EXISTS idx_habits_trigger ON habits(trigger, trigger_value);
+            CREATE INDEX IF NOT EXISTS idx_habit_summaries_time ON habit_summaries(summarized_at DESC);
             """
         )
 
@@ -251,7 +258,7 @@ class LongTermMemory:
             await db.commit()
             return cursor.rowcount > 0
 
-    async def get_habits(self) -> list[dict]:
+    async def get_habits(self) -> list[dict[str, Any]]:
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(

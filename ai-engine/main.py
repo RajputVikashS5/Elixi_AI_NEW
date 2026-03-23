@@ -8,11 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from routers.chat_router import router as chat_router
 from routers.memory_router import router as memory_router
 from routers.emotion_router import router as emotion_router
 from routers.task_router import router as task_router
 from memory_engine.long_term_memory import init_database
+from memory_engine.habit_summarizer import HabitSummarizer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,14 +29,54 @@ ALLOWED_ORIGINS = [
     "http://localhost:5173",
 ]
 
+# Global references for background jobs
+scheduler: AsyncIOScheduler | None = None
+habit_summarizer: HabitSummarizer | None = None
+
+
+async def _run_habit_summarization() -> None:
+    """Background job to summarize habits periodically."""
+    global habit_summarizer
+    if habit_summarizer is None:
+        habit_summarizer = HabitSummarizer()
+    try:
+        await habit_summarizer.summarize_habits()
+    except Exception as exc:
+        logger.error("Habit summarization job failed: %s", exc)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize resources on startup, clean up on shutdown."""
+    global scheduler, habit_summarizer
+
     logger.info("ELIXI AI Engine starting up...")
     await init_database()
+
+    # Initialize habit summarizer and schedule periodic job
+    habit_summarizer = HabitSummarizer()
+    scheduler = AsyncIOScheduler()
+
+    # Schedule habit summarization to run every 2 hours
+    scheduler.add_job(
+        _run_habit_summarization,
+        "interval",
+        hours=2,
+        id="habit_summarization",
+        name="Periodic Habit Summarization",
+    )
+
+    scheduler.start()
+    # Prime summary metadata immediately so suggestions improve without waiting 2 hours.
+    await _run_habit_summarization()
+    logger.info("Habit summarization job scheduled (every 2 hours)")
     logger.info("AI Engine ready on http://localhost:8000")
+
     yield
+
+    # Cleanup on shutdown
+    if scheduler and scheduler.running:
+        scheduler.shutdown()
     logger.info("ELIXI AI Engine shutting down...")
 
 

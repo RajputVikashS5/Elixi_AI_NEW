@@ -5,9 +5,10 @@ import re
 
 class WakeWordDetector:
     def __init__(self, phrases: list[str] | None = None) -> None:
-        self.phrases = phrases or ["elixi", "hey elixi", "ok elixi"]
-        self.running = False
+        self.phrases = phrases or ["hey elixi"]
+        self.running = True
         self.last_detected_phrase: str | None = None
+        self.min_confidence = 0.72
 
     def start(self) -> dict:
         self.running = True
@@ -22,13 +23,17 @@ class WakeWordDetector:
         lowered = cleaned.lower()
 
         for phrase in self.phrases:
-            if phrase in lowered:
+            phrase_index = lowered.find(phrase)
+            if phrase_index >= 0:
                 self.last_detected_phrase = phrase
-                command = re.sub(re.escape(phrase), "", lowered, count=1).strip(" ,.!?-")
+                # Prefer wake-word at the beginning; keep support for mid-sentence usage.
+                confidence = 0.95 if phrase_index == 0 else 0.76
+                command = re.sub(re.escape(phrase), "", cleaned, count=1, flags=re.IGNORECASE).strip(" ,.!?-")
                 return {
                     "detected": True,
                     "matchedPhrase": phrase,
                     "command": command,
+                    "confidence": confidence,
                     "transcript": cleaned,
                 }
 
@@ -36,5 +41,6 @@ class WakeWordDetector:
             "detected": False,
             "matchedPhrase": None,
             "command": "",
+            "confidence": 0.0,
             "transcript": cleaned,
         }

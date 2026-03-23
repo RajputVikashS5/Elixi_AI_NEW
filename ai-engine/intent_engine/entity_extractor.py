@@ -30,6 +30,11 @@ _TIME_PATTERN = re.compile(
     r"\b(\d{1,2}:\d{2}(?:\s?[AP]M)?|\d{1,2}\s?(?:am|pm)|in\s\d+\s(?:minutes?|hours?))\b",
     re.IGNORECASE,
 )
+_ORDER_ITEM_PATTERN = re.compile(
+    r"\b(?:order|get|buy)\s+(?:me\s+)?(?P<item>[a-zA-Z][a-zA-Z\s\-]{1,60})",
+    re.IGNORECASE,
+)
+_LOCATION_PATTERN = re.compile(r"\b(?:in|at|for)\s+([a-zA-Z][a-zA-Z\s\-]{1,40})\b", re.IGNORECASE)
 
 
 class EntityExtractor:
@@ -48,9 +53,25 @@ class EntityExtractor:
         match = _TIME_PATTERN.search(text)
         return match.group(0) if match else None
 
+    def extract_order_item(self, text: str) -> Optional[str]:
+        match = _ORDER_ITEM_PATTERN.search(text)
+        if not match:
+            return None
+        item = match.group("item").strip(" .,!?")
+        return item if item else None
+
+    def extract_location(self, text: str) -> Optional[str]:
+        match = _LOCATION_PATTERN.search(text)
+        if not match:
+            return None
+        location = match.group(1).strip(" .,!?")
+        return location if location else None
+
     def extract_all(self, text: str) -> dict:
         return {
             "app_name": self.extract_app_name(text),
             "file_path": self.extract_file_path(text),
             "time": self.extract_time(text),
+            "item": self.extract_order_item(text),
+            "location": self.extract_location(text),
         }

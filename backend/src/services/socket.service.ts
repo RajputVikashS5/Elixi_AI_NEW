@@ -56,41 +56,63 @@ export function setupSocketHandlers(io: SocketServer): void {
         let fullContent = '';
         let finalActions: unknown[] | undefined;
         let finalIntent: string | undefined;
+        let pendingChunk = '';
+
+        const processStreamLine = (line: string) => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+
+          const payload = trimmed.startsWith('data:')
+            ? trimmed.slice(5).trim()
+            : trimmed;
+
+          if (!payload || payload === '[DONE]') {
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(payload);
+
+            if (parsed.done) {
+              finalActions = parsed.actions;
+              finalIntent = parsed.intent;
+              if (!fullContent && typeof parsed.content === 'string') {
+                fullContent = parsed.content;
+              }
+              return;
+            }
+
+            const token = typeof parsed.token === 'string'
+              ? parsed.token
+              : (typeof parsed.message?.content === 'string' ? parsed.message.content : '');
+
+            if (token) {
+              fullContent += token;
+              socket.emit('chat:token', { token });
+            }
+          } catch {
+            // If JSON parsing fails, treat the payload as a raw text token.
+            fullContent += payload;
+            socket.emit('chat:token', { token: payload });
+          }
+        };
 
         response.data.on('data', (chunk: Buffer) => {
-          const text = chunk.toString();
-          // Parse SSE-style chunks from FastAPI
-          const lines = text.split('\n').filter((l: string) => l.startsWith('data: '));
-          for (const line of lines) {
-            const payload = line.slice(6).trim();
-            if (payload === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(payload);
-              if (parsed.done) {
-                finalActions = parsed.actions;
-                finalIntent = parsed.intent;
-                if (!fullContent && typeof parsed.content === 'string') {
-                  fullContent = parsed.content;
-                }
-                continue;
-              }
+          const text = pendingChunk + chunk.toString('utf8');
+          const lines = text.split(/\r?\n/);
+          pendingChunk = lines.pop() || '';
 
-              const token = parsed.token || '';
-              if (token) {
-                fullContent += token;
-                socket.emit('chat:token', { token });
-              }
-            } catch {
-              // Non-JSON chunk, treat as raw token
-              if (payload && payload !== '[DONE]') {
-                fullContent += payload;
-                socket.emit('chat:token', { token: payload });
-              }
-            }
+          for (const line of lines) {
+            processStreamLine(line);
           }
         });
 
         response.data.on('end', async () => {
+          if (pendingChunk.trim()) {
+            processStreamLine(pendingChunk);
+            pendingChunk = '';
+          }
+
           socket.emit('chat:complete', {
             messageId: assistantMsgId,
             intent: finalIntent || 'chat.general',

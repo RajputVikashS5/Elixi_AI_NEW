@@ -7,6 +7,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useVoice } from '../hooks/useVoice';
 import { VoiceWaveform } from '../components/voice/VoiceWaveform';
 import { VoiceStatusBadge } from '../components/voice/VoiceStatusBadge';
+import { VoiceReactiveOrb } from '../components/voice/VoiceReactiveOrb';
 import { voiceService } from '../services/voiceService';
 
 // ─── capability badge ────────────────────────────────────────────────────────
@@ -132,8 +133,17 @@ const VoicePage: React.FC = () => {
 
       {/* Main interaction panel */}
       <div className="glass-panel flex flex-col items-center gap-6 rounded-2xl border border-elixi-border bg-elixi-surface/60 px-8 py-10">
+        {/* Reactive orb */}
+        <div className="voice-orb-stage">
+          <VoiceReactiveOrb
+            volume={voice.volume}
+            status={voice.status}
+            reducedMotion={settings.reducedMotion}
+          />
+        </div>
+
         {/* Waveform */}
-        <div className="flex h-16 items-center">
+        <div className="flex h-10 items-center -mt-2">
           <VoiceWaveform status={voice.status} volume={voice.volume} />
         </div>
 

@@ -8,6 +8,11 @@ logger = logging.getLogger(__name__)
 
 # Keyword → intent mapping (first match wins; order matters)
 _RULES: list[tuple[list[str], IntentCategory]] = [
+    (["order pizza", "order food", "get me something to eat", "order groceries"], IntentCategory.ORDER_FOOD),
+    (["track my order", "where is my order", "order status"], IntentCategory.TRACK_ORDER),
+    (["weather", "temperature", "forecast"], IntentCategory.GET_WEATHER),
+    (["cancel it", "cancel that", "never mind"], IntentCategory.ACTION_CANCEL),
+    (["same again", "order same again", "do that again", "repeat that"], IntentCategory.ACTION_REPEAT),
     (["open ", "launch ", "start ", "run "], IntentCategory.AUTOMATION_OPEN_APP),
     (["close ", "kill ", "quit "], IntentCategory.AUTOMATION_CLOSE_APP),
     (["create file", "new file", "make file"], IntentCategory.AUTOMATION_FILE_CREATE),
@@ -30,3 +35,22 @@ class IntentClassifier:
                 logger.debug("Intent '%s' matched for: %.60s", intent, text)
                 return intent
         return IntentCategory.CHAT_GENERAL
+
+    def confidence_for(self, text: str, intent: IntentCategory) -> float:
+        lowered = text.lower()
+        # Higher confidence for explicit command style utterances.
+        if intent in {
+            IntentCategory.ORDER_FOOD,
+            IntentCategory.TRACK_ORDER,
+            IntentCategory.GET_WEATHER,
+            IntentCategory.AUTOMATION_OPEN_APP,
+            IntentCategory.AUTOMATION_CLOSE_APP,
+        }:
+            return 0.9
+        if intent in {IntentCategory.ACTION_CANCEL, IntentCategory.ACTION_REPEAT}:
+            return 0.8
+        if "?" in lowered or lowered.startswith(("what", "how", "why", "when")):
+            return 0.78
+        if intent == IntentCategory.CHAT_GENERAL:
+            return 0.65
+        return 0.75
