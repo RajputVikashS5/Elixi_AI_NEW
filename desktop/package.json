@@ -5,8 +5,8 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:ui\" \"npm run dev:electron\"",
-    "dev:ui": "vite --config react-ui/vite.config.ts",
-    "dev:electron": "wait-on http://localhost:5173 && tsc -p tsconfig.json && electron .",
+    "dev:ui": "vite --host 127.0.0.1 --config react-ui/vite.config.ts",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && tsc -p tsconfig.json && electron .",
     "build": "npm run build:ui && npm run build:electron",
     "build:ui": "vite build --config react-ui/vite.config.ts",
     "build:electron": "tsc -p tsconfig.json"

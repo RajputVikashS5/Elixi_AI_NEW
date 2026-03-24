@@ -10,13 +10,14 @@ import { ChatInput } from '../components/chat/ChatInput';
 import { CommandSuggestions } from '../components/chat/CommandSuggestions';
 import { VoiceStatusBadge } from '../components/voice/VoiceStatusBadge';
 import { WorkflowVisualizer } from '../components/automation/WorkflowVisualizer';
+import { EmotionTimelinePanel } from '../components/emotion/EmotionTimelinePanel';
 import { useVoiceStore } from '../store/voiceStore';
 import { Button } from '../components/ui/Button';
 
 const ChatPage: React.FC = () => {
   const { messages, sessionId, isLoading, isStreaming, addMessage, newSession } = useChatStore();
-  const { personalityMode, ollamaModel } = useSettingsStore();
-  const { emotion } = useEmotionStore();
+  const { personalityMode, llmProvider, ollamaModel, onlineModel } = useSettingsStore();
+  const { emotion, history: emotionHistory } = useEmotionStore();
   const { status: voiceStatus, transcript } = useVoiceStore();
   const { sendMessage } = useSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -42,9 +43,22 @@ const ChatPage: React.FC = () => {
       assistantId,
       { state: emotion.state, confidence: emotion.confidence },
       personalityMode,
-      ollamaModel
+      llmProvider,
+      ollamaModel,
+      onlineModel
     );
-  }, [isLoading, isStreaming, addMessage, sendMessage, sessionId, emotion, personalityMode, ollamaModel]);
+  }, [
+    isLoading,
+    isStreaming,
+    addMessage,
+    sendMessage,
+    sessionId,
+    emotion,
+    personalityMode,
+    llmProvider,
+    ollamaModel,
+    onlineModel,
+  ]);
 
   const showWelcome = messages.length === 0;
 
@@ -79,6 +93,7 @@ const ChatPage: React.FC = () => {
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         <WorkflowVisualizer />
+        <EmotionTimelinePanel current={emotion} history={emotionHistory} />
 
         {showWelcome ? (
           <div className="flex flex-col items-center justify-center h-full gap-6 text-center">

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useSettingsStore, PersonalityMode, OllamaModel } from '../store/settingsStore';
+import { useSettingsStore, PersonalityMode, LlmProvider, OllamaModel } from '../store/settingsStore';
 import { voiceService, VoiceEntry } from '../services/voiceService';
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
@@ -122,6 +122,13 @@ const SettingsPage: React.FC = () => {
     { value: 'mistral:7b', label: 'Mistral 7B (explicit)' },
   ];
 
+  const providerOptions: { value: LlmProvider; label: string }[] = [
+    { value: 'ollama', label: 'Local Ollama (offline)' },
+    { value: 'openrouter', label: 'OpenRouter (cloud)' },
+    { value: 'gemini', label: 'Google Gemini (cloud)' },
+    { value: 'online', label: 'Online API (legacy alias)' },
+  ];
+
   const voiceOptions = [
     { value: '', label: 'System default' },
     ...voices.map((v) => ({ value: v.id, label: v.name })),
@@ -145,6 +152,14 @@ const SettingsPage: React.FC = () => {
       </Section>
 
       <Section title="AI Model">
+        <SettingRow label="LLM Provider" description="Choose local offline or online cloud model provider">
+          <Select
+            value={settings.llmProvider}
+            onChange={(v) => settings.setLlmProvider(v as LlmProvider)}
+            options={providerOptions}
+          />
+        </SettingRow>
+
         <SettingRow label="Ollama Model" description="Local LLM model to use for inference">
           <Select
             value={settings.ollamaModel}
@@ -152,6 +167,17 @@ const SettingsPage: React.FC = () => {
             options={modelOptions}
           />
         </SettingRow>
+
+        <SettingRow label="Online Model" description="Model name used when provider is set to Online API">
+          <input
+            type="text"
+            value={settings.onlineModel}
+            onChange={(e) => settings.setOnlineModel(e.target.value)}
+            className="bg-elixi-bg border border-elixi-border rounded-lg px-3 py-1.5 text-sm text-elixi-text outline-none focus:border-elixi-primary/50 selectable w-52"
+            placeholder="gpt-4o-mini"
+          />
+        </SettingRow>
+
         <SettingRow label="Ollama URL" description="URL of your local Ollama server">
           <input
             type="text"
@@ -231,7 +257,7 @@ const SettingsPage: React.FC = () => {
       </Section>
 
       <div className="text-center text-xs text-elixi-muted/50 pb-4">
-        ELIXI v1.0.0 · All data stays on your device · No cloud required
+        ELIXI v1.0.0 · Local-first assistant with optional cloud model support
       </div>
     </div>
   );

@@ -7,7 +7,55 @@ import { memoryService } from './memory.service';
 import { automationService, WorkflowPermissionError, WorkflowProgressEvent } from './automation.service';
 import { voiceService } from './voice.service';
 
-const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://localhost:8000';
+const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://127.0.0.1:8000';
+const AI_READY_TIMEOUT_MS = 45_000;
+
+function isRetryableAiStreamError(err: unknown): boolean {
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status;
+    if (status === 408 || status === 429 || (typeof status === 'number' && status >= 500)) {
+      return true;
+    }
+    return ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED'].includes(err.code || '');
+  }
+
+  const code = (err as { code?: string })?.code;
+  return ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED'].includes(code || '');
+}
+
+function normalizeSocketError(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status;
+    const detail = typeof err.response?.data === 'string'
+      ? err.response.data
+      : JSON.stringify(err.response?.data || {});
+    return `code=${err.code || 'n/a'} status=${status || 'n/a'} detail=${detail}`;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return String(err);
+}
+
+async function waitForAiEngineReady(timeoutMs = AI_READY_TIMEOUT_MS): Promise<boolean> {
+  const startedAt = Date.now();
+  let attempt = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    attempt += 1;
+    try {
+      await axios.get(`${AI_ENGINE_URL}/health`, { timeout: 2_500 });
+      return true;
+    } catch {
+      // AI engine may still be booting.
+    }
+
+    const delayMs = Math.min(300 + attempt * 350, 2_500);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  return false;
+}
 
 export function setupSocketHandlers(io: SocketServer): void {
   io.on('connection', (socket) => {
@@ -24,38 +72,103 @@ export function setupSocketHandlers(io: SocketServer): void {
       sessionId: string;
       emotionContext?: object;
       personalityMode?: string;
+      llmProvider?: 'ollama' | 'openrouter' | 'gemini' | 'online';
       ollamaModel?: string;
+      onlineModel?: string;
     }) => {
-      const { message, sessionId, emotionContext, personalityMode, ollamaModel } = data;
+      const { message, sessionId, emotionContext, personalityMode, llmProvider, ollamaModel, onlineModel } = data;
 
       if (!message || typeof message !== 'string') return;
 
       const sanitizedMsg = sanitizeInput(message);
+      if (!sanitizedMsg) {
+        socket.emit('chat:complete', {
+          messageId: uuidv4(),
+          error: true,
+          message: 'Message cannot be empty',
+        });
+        return;
+      }
+
+      const resolvedSessionId = sessionId || uuidv4();
       const userMsgId = uuidv4();
       const assistantMsgId = uuidv4();
 
-      // Store user message
-      await memoryService.storeMessage({
-        id: userMsgId,
-        sessionId: sessionId || uuidv4(),
-        role: 'user',
-        content: sanitizedMsg,
-      });
-
       try {
-        // Stream from AI engine
-        const response = await axios.post(
-          `${AI_ENGINE_URL}/ai/chat`,
-          { sessionId, message: sanitizedMsg, emotionContext, personalityMode, ollamaModel, stream: true },
-          {
-            responseType: 'stream',
-            timeout: 120_000,
+        // Store user message before contacting AI; do not fail chat if persistence fails.
+        try {
+          await memoryService.storeMessage({
+            id: userMsgId,
+            sessionId: resolvedSessionId,
+            role: 'user',
+            content: sanitizedMsg,
+          });
+        } catch (persistErr) {
+          logger.warn('Unable to persist user message before AI request', {
+            socketId: socket.id,
+            sessionId: resolvedSessionId,
+            error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+          });
+        }
+
+        const requestChatStream = async () => {
+          let lastErr: unknown;
+
+          const ready = await waitForAiEngineReady();
+          if (!ready) {
+            throw new Error('AI engine is not ready yet. Please wait a moment and try again.');
           }
-        );
+
+          for (let attempt = 1; attempt <= 8; attempt++) {
+            try {
+              return await axios.post(
+                `${AI_ENGINE_URL}/ai/chat`,
+                {
+                  sessionId: resolvedSessionId,
+                  message: sanitizedMsg,
+                  emotionContext,
+                  personalityMode,
+                  llmProvider,
+                  ollamaModel,
+                  onlineModel,
+                  stream: true,
+                },
+                {
+                  responseType: 'stream',
+                  timeout: 150_000,
+                }
+              );
+            } catch (err) {
+              lastErr = err;
+              const retryable = isRetryableAiStreamError(err);
+
+              logger.warn('AI stream request failed', {
+                socketId: socket.id,
+                sessionId: resolvedSessionId,
+                attempt,
+                retryable,
+                error: normalizeSocketError(err),
+              });
+
+              if (!retryable || attempt === 8) {
+                throw err;
+              }
+
+              // Give AI engine more time during cold starts.
+              await new Promise((resolve) => setTimeout(resolve, Math.min(attempt * 1_000, 5_000)));
+            }
+          }
+
+          throw lastErr;
+        };
+
+        // Stream from AI engine
+        const response = await requestChatStream();
 
         let fullContent = '';
         let finalActions: unknown[] | undefined;
         let finalIntent: string | undefined;
+        let finalError: string | undefined;
         let pendingChunk = '';
 
         const processStreamLine = (line: string) => {
@@ -72,6 +185,15 @@ export function setupSocketHandlers(io: SocketServer): void {
 
           try {
             const parsed = JSON.parse(payload);
+
+            if (typeof parsed.error === 'string' && parsed.error.trim()) {
+              finalError = parsed.error;
+              // Make error visible in chat timeline instead of ending with an empty assistant bubble.
+              if (!fullContent) {
+                fullContent = parsed.error;
+              }
+              socket.emit('chat:token', { token: parsed.error });
+            }
 
             if (parsed.done) {
               finalActions = parsed.actions;
@@ -117,35 +239,65 @@ export function setupSocketHandlers(io: SocketServer): void {
             messageId: assistantMsgId,
             intent: finalIntent || 'chat.general',
             actions: finalActions,
+            error: Boolean(finalError),
           });
 
-          // Store assistant message
-          await memoryService.storeMessage({
-            id: assistantMsgId,
-            sessionId: sessionId || uuidv4(),
-            role: 'assistant',
-            content: fullContent,
-          });
+          // Store assistant message; log and continue if persistence fails.
+          if (fullContent) {
+            try {
+              await memoryService.storeMessage({
+                id: assistantMsgId,
+                sessionId: resolvedSessionId,
+                role: 'assistant',
+                content: fullContent,
+              });
+            } catch (persistErr) {
+              logger.warn('Unable to persist assistant message after AI stream', {
+                socketId: socket.id,
+                sessionId: resolvedSessionId,
+                error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+              });
+            }
+          }
         });
 
         response.data.on('error', (err: Error) => {
-          logger.error('AI stream error:', err);
-          socket.emit('chat:complete', { messageId: assistantMsgId, error: true });
+          logger.error('AI stream error', {
+            socketId: socket.id,
+            sessionId: resolvedSessionId,
+            error: err.message,
+          });
+          socket.emit('chat:complete', { messageId: assistantMsgId, error: true, message: 'AI stream interrupted' });
         });
       } catch (err) {
-        logger.error('Failed to connect to AI engine:', err);
+        logger.error('Failed to connect to AI engine', {
+          socketId: socket.id,
+          sessionId: resolvedSessionId,
+          error: normalizeSocketError(err),
+        });
         // Fallback: send an error message token
-        const errMsg = 'I could not connect to the AI engine. Please ensure Ollama is running and the AI engine is started (npm run start:ai).';
+        const errMsg = 'I could not connect to the AI engine. Ensure the AI engine is running (npm run start:ai) and your selected model provider is configured.';
         for (const char of errMsg) {
           socket.emit('chat:token', { token: char });
           await new Promise((r) => setTimeout(r, 10));
         }
-        socket.emit('chat:complete', { messageId: assistantMsgId });
+        socket.emit('chat:complete', { messageId: assistantMsgId, error: true, message: errMsg });
       }
     });
 
     // Emotion signal handler
-    socket.on('emotion:signal', async (data: { typing_wpm: number; errors: number }) => {
+    socket.on('emotion:signal', async (data: {
+      typing_wpm?: number;
+      errors?: number;
+      typing_pause_ms?: number;
+      time_of_day?: string;
+      voice_pitch?: number;
+      voice_energy?: number;
+      voice_speech_rate?: number;
+      voice_jitter?: number;
+      webcam_face_engagement?: number;
+      webcam_eye_strain?: number;
+    }) => {
       try {
         const res = await axios.post<{ state: string; confidence: number }>(
           `${AI_ENGINE_URL}/ai/emotion`,
@@ -153,8 +305,11 @@ export function setupSocketHandlers(io: SocketServer): void {
           { timeout: 5_000 }
         );
         socket.emit('emotion:update', res.data);
-      } catch {
-        // Silently fail emotion updates
+      } catch (err) {
+        logger.debug('Emotion update failed', {
+          socketId: socket.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     });
 
@@ -176,7 +331,11 @@ export function setupSocketHandlers(io: SocketServer): void {
         });
 
         socket.emit('voice:status', { status: session.status });
-      } catch {
+      } catch (err) {
+        logger.warn('voice:start failed', {
+          socketId: socket.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
         socket.emit('voice:status', { status: 'idle', error: true });
       }
     });
@@ -186,7 +345,11 @@ export function setupSocketHandlers(io: SocketServer): void {
         voiceService.stopStreamConnection(socket.id);
         const session = await voiceService.stopSession();
         socket.emit('voice:status', { status: session.status });
-      } catch {
+      } catch (err) {
+        logger.warn('voice:stop failed', {
+          socketId: socket.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
         socket.emit('voice:status', { status: 'idle', error: true });
       }
     });
@@ -220,7 +383,11 @@ export function setupSocketHandlers(io: SocketServer): void {
         if (!forwarded) {
           socket.emit('voice:status', { status: 'idle', error: true });
         }
-      } catch {
+      } catch (err) {
+        logger.warn('voice:audio processing failed', {
+          socketId: socket.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
         socket.emit('voice:status', { status: 'idle', error: true });
       }
     });

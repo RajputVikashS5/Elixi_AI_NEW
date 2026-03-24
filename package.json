@@ -8,12 +8,19 @@
     "backend"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev": "concurrently \"npm run dev:ai\" \"npm run dev:voice\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:all": "npm run dev",
+    "dev:core": "concurrently \"npm run dev:ai\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:all-with-voice": "concurrently \"npm run dev:ai\" \"npm run dev:voice\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:ai": "npm run start:ai",
+    "dev:voice": "npm run start:voice",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:ui": "npm run dev:ui --workspace=desktop",
-    "dev:electron": "wait-on http://localhost:5173 && electron desktop/electron/main.js",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && electron desktop/electron/main.js",
     "build": "npm run build --workspace=desktop && npm run build --workspace=backend",
+    "check:startup": "node scripts/startup-health-check.mjs",
     "test:phase12": "powershell -ExecutionPolicy Bypass -File ./scripts/phase12-regression.ps1",
+    "test:db": "cd backend && npx ts-node ../scripts/test-db-connections.ts",
     "start:ai": "cd ai-engine && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
     "start:voice": "cd voice-engine && uvicorn voice_server:app --host 0.0.0.0 --port 8001 --reload"
   },

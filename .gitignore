@@ -52,6 +52,9 @@ logs/
 .env.local
 .env.*.local
 
+# Local diagnostics temp files
+backend/.tmp-*.cjs
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -1,8 +1,8 @@
 # ELIXI Current Implementation Report
 
-Date: March 16, 2026
-Scope: Codebase inspection of the current workspace state
-Status: Core desktop, backend, AI, memory, and workflow foundations are implemented; voice and some advanced AI features remain partial or stubbed.
+Date: March 23, 2026
+Scope: Codebase inspection and implementation-progress update for the current workspace state
+Status: Core desktop, backend, AI, memory, workflow, and startup orchestration layers are implemented with production-oriented fallback routing (Gemini/OpenRouter/Ollama), improved runtime resilience, and baseline offline voice support.
 
 ## 1. Executive Summary
 
@@ -17,6 +17,27 @@ The project already supports local chat, session/history persistence, facts and 
 
 The architecture described in the main documentation broadly matches the repository, but some roadmap features are not fully implemented yet. The largest gaps are in the voice stack, vector memory, and deeper adaptive or proactive intelligence features.
 
+## 1A. Implementation Progress Snapshot (March 23, 2026)
+
+| Area | Progress | Current State |
+|---|---:|---|
+| Desktop + UI integration | 92% | Stable multi-page desktop app with socket chat and voice state surfaces |
+| Backend orchestration | 94% | Express + Socket.io with hardened streaming, retries, and health coverage |
+| AI provider integration | 95% | Gemini + OpenRouter + Ollama with fallback chain and `/ai/chat` endpoint |
+| Memory + persistence | 86% | Shared SQLite persistence with semantic retrieval baseline |
+| Automation + permissions | 91% | Workflow execution, safety validation, and auditability in place |
+| Voice pipeline | 83% | Offline-capable STT/TTS and stream bridge working, with quality/coverage refinements pending |
+| Startup reliability | 96% | Root-level startup health checks with 8/8 pass validation in current run |
+
+Recently completed in this implementation cycle:
+
+- Added production-oriented multi-provider AI routing with fallback behavior and timeout/retry handling
+- Integrated OpenRouter and Gemini provider options across backend, AI engine, and UI settings flows
+- Fixed renderer auto-TTS playback path and stream-state watchdog to reduce stuck-response states
+- Added AI readiness waiting and stronger socket-side resilience for cold-start scenarios
+- Resolved Chroma telemetry warning spam with explicit no-op telemetry implementation
+- Added root startup verification script and aligned host/binding behavior for reliable local bring-up
+
 ## 2. Runtime Topology
 
 Current ports and process roles are aligned around the following services:
@@ -26,7 +47,7 @@ Current ports and process roles are aligned around the following services:
 | React UI | 5173 | Renderer UI | Implemented |
 | Node backend | 3001 | REST + Socket.io bridge | Implemented |
 | Python AI engine | 8000 | Chat, memory, emotion, task planning APIs | Implemented |
-| Python voice engine | 8001 | Voice status, transcript stream, TTS endpoint | Partial |
+| Python voice engine | 8001 | Voice status, transcript stream, TTS endpoint | Implemented (baseline) |
 
 The root workspace scripts support local development and split startup by subsystem:
 
@@ -115,6 +136,7 @@ Current route groups:
 - `/api/memory`
 - `/api/voice`
 - `/api/system`
+- `/ai/chat`
 - `/health`
 
 This layer is functioning as the application coordinator between the desktop app, AI engine, memory database, automation subsystem, and voice service.
@@ -139,12 +161,21 @@ Implemented AI features:
 - Entity extraction
 - Prompt building with personality and emotion context
 - Ollama client integration for local LLM calls
+- OpenRouter client integration for cloud model inference
+- Gemini client integration for cloud model inference
+- Provider fallback routing chain with retry/timeout handling in backend AI service
 - Response parsing layer
 - Task planning API
 - Emotion analysis API
 - Memory API integration
 
 The AI engine is not just a thin proxy to Ollama. It already contains application logic for intent, prompt construction, memory injection, and task decomposition.
+
+Provider routing status:
+
+- Backend direct AI path (`/ai/chat`) supports Gemini, OpenRouter, and Ollama with fallback behavior
+- Existing chat pipeline (`/api/chat/message`) remains active through AI-engine orchestration
+- Startup checks now prefer cloud providers when keys are configured and only fall back to local models when needed
 
 Representative files:
 
@@ -321,7 +352,7 @@ Representative files:
 | Electron shell | Implemented | Hardened desktop wrapper with tray, preload bridge, updater wiring |
 | React UI | Implemented | Multi-page UI with chat, automation, memory, settings |
 | Backend API | Implemented | Express routes, Socket.io, middleware, rate limits, DB bootstrap |
-| AI engine | Implemented | FastAPI routers, Ollama integration, prompt and intent layers |
+| AI engine | Implemented | FastAPI routers, intent/prompt layers, OpenRouter/Gemini support, and local-model fallback |
 | Memory persistence | Implemented | Shared SQLite-backed sessions, messages, facts, habits, audit log |
 | Automation engine | Implemented | Workflow execution, permissions, validation, audit trail |
 | Voice transport | Implemented | Session/status/stream plumbing plus renderer PCM capture path |

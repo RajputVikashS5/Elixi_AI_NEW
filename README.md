@@ -2,7 +2,7 @@
 
 > **Intelligence with Empathy**
 
-ELIXI is a fully local, privacy-first AI-powered desktop assistant built with Electron, React, Node.js, and Python (FastAPI + Ollama). It runs entirely offline — no cloud, no data leaks.
+ELIXI is a local-first, privacy-focused AI desktop assistant built with Electron, React, Node.js, and Python (FastAPI + Ollama), with optional online model support.
 
 ---
 
@@ -14,6 +14,7 @@ ELIXI is a fully local, privacy-first AI-powered desktop assistant built with El
 - **Python** 3.11.x
 - **Ollama** – [Install from ollama.ai](https://ollama.ai)
 - Pull a model: `ollama pull llama3` or `ollama pull mistral`
+- Optional for cloud mode: an online AI provider API key (OpenAI-compatible endpoint)
 
 ### 1. Install Node.js dependencies
 
@@ -38,6 +39,20 @@ pip install -r requirements.txt
 ### 4. Configure ELIXI
 
 Edit `config/elixi.config.json` to set your preferred model and settings.
+
+For cloud model mode, create `ai-engine/.env`:
+
+```bash
+GEMINI_API_KEY=your_gemini_key_here
+GEMINI_MODEL=gemini-2.0-flash
+
+OPENROUTER_API_KEY=your_openrouter_key_here
+OPENROUTER_MODEL=meta-llama/llama-3-8b-instruct
+OPENROUTER_SITE_URL=http://localhost
+OPENROUTER_APP_NAME=Elixi AI Engine
+```
+
+Then select **OpenRouter (cloud)** or **Google Gemini (cloud)** in the app settings page under **AI Model → LLM Provider**.
 
 ### 5. Start all services
 
@@ -66,7 +81,7 @@ Electron Shell (desktop/electron/)
             ↕ Socket.io + REST
     Node.js Backend (backend/)
             ↕ HTTP
-    Python AI Engine (ai-engine/) → Ollama (local LLM)
+        Python AI Engine (ai-engine/) → Ollama (local) or online API model
     Python Voice Engine (voice-engine/)
 ```
 

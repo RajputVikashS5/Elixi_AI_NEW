@@ -11,12 +11,13 @@ import { automationRoutes } from './routes/automation.routes';
 import { memoryRoutes } from './routes/memory.routes';
 import { voiceRoutes } from './routes/voice.routes';
 import { systemRoutes } from './routes/system.routes';
+import { aiRoutes } from './routes/ai.routes';
 import { setupSocketHandlers } from './services/socket.service';
 import { initializeDatabase } from './services/memory.service';
 import { logger } from './utils/logger';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
-const ALLOWED_ORIGINS = ['http://localhost:5173', 'http://localhost:3000'];
+const ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
 
 async function bootstrap() {
   const app = express();
@@ -42,10 +43,12 @@ async function bootstrap() {
 
   // Rate limiting per endpoint group
   app.use('/api/chat', createRateLimiter({ windowMs: 60_000, max: 60 }));
+  app.use('/ai', createRateLimiter({ windowMs: 60_000, max: 60 }));
   app.use('/api/automation', createRateLimiter({ windowMs: 60_000, max: 30 }));
   app.use('/api/', createRateLimiter({ windowMs: 60_000, max: 200 }));
 
   // Routes
+  app.use('/ai', aiRoutes);
   app.use('/api/chat', chatRoutes);
   app.use('/api/automation', automationRoutes);
   app.use('/api/memory', memoryRoutes);

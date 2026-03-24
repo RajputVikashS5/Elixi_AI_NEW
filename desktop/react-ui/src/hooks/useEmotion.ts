@@ -12,10 +12,12 @@ export function useEmotion() {
   const { sendEmotionSignal } = useSocket();
 
   const recordKeystroke = useCallback((isError = false) => {
+    const now = Date.now();
+    const pauseMs = now - lastKeyTime;
+
     keyCount++;
     if (isError) errorCount++;
 
-    const now = Date.now();
     const elapsed = (now - lastKeyTime) / 1000 / 60; // minutes
     if (elapsed > 0) {
       const wpm = Math.round(keyCount / 5 / elapsed); // standard WPM (chars/5 per minute)
@@ -23,7 +25,7 @@ export function useEmotion() {
 
       // Send signal every 10 keystrokes
       if (keyCount % 10 === 0) {
-        sendEmotionSignal(wpm, errorCount);
+        sendEmotionSignal(wpm, errorCount, pauseMs);
       }
     }
 
@@ -32,7 +34,10 @@ export function useEmotion() {
       keyCount = 0;
       errorCount = 0;
       lastKeyTime = now;
+      return;
     }
+
+    lastKeyTime = now;
   }, [recordTypingSignal, sendEmotionSignal]);
 
   return { emotion, recordKeystroke };

@@ -7,8 +7,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+import os
+from dotenv import load_dotenv
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+load_dotenv()
+
+# Disable Chroma product telemetry to avoid noisy Posthog compatibility errors.
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "FALSE")
+os.environ.setdefault("CHROMA_PRODUCT_TELEMETRY_IMPL", "chroma_telemetry.NullTelemetry")
+os.environ.setdefault("CHROMA_TELEMETRY_IMPL", "chroma_telemetry.NullTelemetry")
 
 from routers.chat_router import router as chat_router
 from routers.memory_router import router as memory_router

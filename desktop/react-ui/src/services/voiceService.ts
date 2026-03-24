@@ -21,6 +21,12 @@ export interface VoiceEntry {
   culture: string;
 }
 
+export interface TtsAudioPayload {
+  audioBase64: string;
+  mimeType: string;
+  status: string;
+}
+
 export const voiceService = {
   getStatus: async (): Promise<VoiceStatusResponse> => {
     const res = await api.get<VoiceStatusResponse>('/api/voice/status');
@@ -43,7 +49,7 @@ export const voiceService = {
   },
 
   tts: async (text: string) => {
-    const res = await api.post<{ success: boolean; data: unknown }>('/api/voice/tts', { text });
+    const res = await api.post<{ success: boolean; data: TtsAudioPayload }>('/api/voice/tts', { text });
     return res.data;
   },
 

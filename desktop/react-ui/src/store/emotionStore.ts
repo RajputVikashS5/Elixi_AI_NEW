@@ -2,20 +2,33 @@ import { create } from 'zustand';
 
 export type EmotionState = 'focused' | 'stressed' | 'fatigued' | 'frustrated' | 'motivated' | 'neutral';
 
-interface EmotionData {
+export interface EmotionSignalItem {
+  source: string;
+  state: string;
+  confidence: number;
+  weight?: number;
+  summary?: string;
+}
+
+interface EmotionSignalsSnapshot {
+  typing?: { wpm: number; errorRate: number };
+  timeOfDay?: string;
+  sources?: string[];
+  summaries?: string[];
+  rawSignals?: EmotionSignalItem[];
+}
+
+export interface EmotionData {
   state: EmotionState;
   confidence: number;
-  signals: {
-    typing?: { wpm: number; errorRate: number };
-    timeOfDay?: string;
-  };
+  signals: EmotionSignalsSnapshot;
   updatedAt: Date;
 }
 
 interface EmotionStoreState {
   emotion: EmotionData;
   history: EmotionData[];
-  updateEmotion: (state: EmotionState, confidence: number, signals?: EmotionData['signals']) => void;
+  updateEmotion: (state: EmotionState, confidence: number, signals?: EmotionSignalsSnapshot) => void;
   recordTypingSignal: (wpm: number, errors: number) => void;
 }
 

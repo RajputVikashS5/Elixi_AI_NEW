@@ -1,6 +1,8 @@
 """Chat router with intent classification and optional SSE streaming."""
 
 import json
+import logging
+import os
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -9,17 +11,23 @@ from intent_engine.intent_classifier import IntentClassifier
 from intent_engine.entity_extractor import EntityExtractor
 from intent_engine.prompt_builder import PromptBuilder
 from intent_engine.ollama_client import OllamaClient
+from intent_engine.online_client import OnlineLLMClient
 from intent_engine.response_parser import ResponseParser
 from memory_engine.memory_router import MemoryRouter
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 intent_classifier = IntentClassifier()
 entity_extractor = EntityExtractor()
 prompt_builder = PromptBuilder()
 ollama_client = OllamaClient()
+online_client = OnlineLLMClient()
 response_parser = ResponseParser()
 memory_router = MemoryRouter()
+
+DEFAULT_OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", os.getenv("ELIXI_ONLINE_MODEL", "meta-llama/llama-3-8b-instruct"))
+DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 
 def _to_sse(payload: dict) -> str:
@@ -56,7 +64,11 @@ async def chat(body: ChatRequest):
     intent = intent_classifier.classify(body.message)
     intent_confidence = intent_classifier.confidence_for(body.message, intent)
     entities = entity_extractor.extract_all(body.message)
-    model = body.ollamaModel.value if body.ollamaModel else "llama3"
+    provider = body.llmProvider.value if body.llmProvider else "ollama"
+    ollama_model = body.ollamaModel.value if body.ollamaModel else "llama3"
+    configured_online_model = (body.onlineModel or "").strip()
+    openrouter_model = configured_online_model or DEFAULT_OPENROUTER_MODEL
+    gemini_model = configured_online_model or DEFAULT_GEMINI_MODEL
 
     context = await memory_router.get_context(body.sessionId, body.message, intent.value, entities)
 
@@ -85,11 +97,46 @@ async def chat(body: ChatRequest):
     history = context.get("short_history", [])
     messages = prompt_builder.build_messages(body.message, history, system_prompt)
 
+    async def model_streamer():
+        if provider in {"online", "openrouter", "gemini"}:
+            provider_key = "openrouter" if provider == "online" else provider
+            provider_model = openrouter_model if provider_key == "openrouter" else gemini_model
+
+            if not online_client.is_configured(provider_key):
+                if await ollama_client.is_available():
+                    logger.warning("%s provider not configured; falling back to Ollama", provider_key)
+                    async for token in ollama_client.chat(messages=messages, model=ollama_model, stream=True):
+                        yield token
+                    return
+                raise RuntimeError(
+                    f"{provider_key} provider is not configured. Set required API key in ai-engine environment."
+                )
+
+            try:
+                async for token in online_client.chat(
+                    messages=messages,
+                    model=provider_model,
+                    stream=True,
+                    provider=provider_key,
+                ):
+                    yield token
+                return
+            except Exception as exc:
+                if await ollama_client.is_available():
+                    logger.warning("%s provider failed (%s); falling back to Ollama", provider_key, exc)
+                    async for token in ollama_client.chat(messages=messages, model=ollama_model, stream=True):
+                        yield token
+                    return
+                raise RuntimeError(f"{provider_key} AI request failed: {str(exc)}") from exc
+
+        async for token in ollama_client.chat(messages=messages, model=ollama_model, stream=True):
+            yield token
+
     if body.stream:
         async def stream_generator():
             full_text = ""
             try:
-                async for token in ollama_client.chat(messages=messages, model=model, stream=True):
+                async for token in model_streamer():
                     full_text += token
                     yield _to_sse({"token": token, "done": False})
 
@@ -124,7 +171,7 @@ async def chat(body: ChatRequest):
 
     try:
         full_text = ""
-        async for token in ollama_client.chat(messages=messages, model=model, stream=True):
+        async for token in model_streamer():
             full_text += token
 
         parsed = response_parser.parse(

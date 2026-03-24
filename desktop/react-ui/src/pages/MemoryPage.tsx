@@ -276,9 +276,9 @@ const MemoryPage: React.FC = () => {
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${getSourceBadgeColor(result.source)}`}>
                       {result.source}
                     </span>
-                    {result.metadata && result.metadata.category && (
+                    {typeof result.metadata?.category === 'string' && result.metadata.category.length > 0 && (
                       <span className="text-xs px-2 py-0.5 rounded-full bg-elixi-primary/10 text-elixi-primary border border-elixi-primary/20 font-medium capitalize">
-                        {String(result.metadata.category)}
+                        {result.metadata.category}
                       </span>
                     )}
                   </div>

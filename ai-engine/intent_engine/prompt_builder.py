@@ -50,7 +50,12 @@ class PromptBuilder:
 
         if emotion_context and emotion_context.state and emotion_context.state != "neutral":
             state = emotion_context.state
-            parts.append(self.response_modulator.style_hint(state))
+            parts.append(
+                self.response_modulator.guidance_block(
+                    emotion_state=state,
+                    confidence=emotion_context.confidence,
+                )
+            )
             if state == "stressed":
                 parts.append("The user appears stressed — keep responses calm and reassuring.")
             elif state == "fatigued":

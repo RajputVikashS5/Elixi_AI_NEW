@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 
 export type PersonalityMode = 'professional' | 'friendly' | 'calm' | 'focus' | 'silent';
+export type LlmProvider = 'ollama' | 'openrouter' | 'gemini' | 'online';
 export type OllamaModel = 'llama3' | 'mistral' | 'llama3:8b' | 'mistral:7b';
 
 interface SettingsState {
   personalityMode: PersonalityMode;
+  llmProvider: LlmProvider;
   ollamaModel: OllamaModel;
+  onlineModel: string;
   ollamaUrl: string;
   backendUrl: string;
   voiceEnabled: boolean;
@@ -16,7 +19,9 @@ interface SettingsState {
   fontSize: 'small' | 'medium' | 'large';
   reducedMotion: boolean;
   setPersonalityMode: (mode: PersonalityMode) => void;
+  setLlmProvider: (provider: LlmProvider) => void;
   setOllamaModel: (model: OllamaModel) => void;
+  setOnlineModel: (model: string) => void;
   setOllamaUrl: (url: string) => void;
   setBackendUrl: (url: string) => void;
   setVoiceEnabled: (enabled: boolean) => void;
@@ -30,7 +35,9 @@ interface SettingsState {
 
 export const useSettingsStore = create<SettingsState>((set) => ({
   personalityMode: 'professional',
+  llmProvider: 'openrouter',
   ollamaModel: 'llama3',
+  onlineModel: 'meta-llama/llama-3-8b-instruct',
   ollamaUrl: 'http://localhost:11434',
   backendUrl: 'http://localhost:3001',
   voiceEnabled: false,
@@ -41,7 +48,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   fontSize: 'medium',
   reducedMotion: false,
   setPersonalityMode: (mode) => set({ personalityMode: mode }),
+  setLlmProvider: (provider) => set({ llmProvider: provider }),
   setOllamaModel: (model) => set({ ollamaModel: model }),
+  setOnlineModel: (model) => set({ onlineModel: model }),
   setOllamaUrl: (url) => set({ ollamaUrl: url }),
   setBackendUrl: (url) => set({ backendUrl: url }),
   setVoiceEnabled: (enabled) => set({ voiceEnabled: enabled }),

@@ -13,7 +13,9 @@ const sendMessageSchema = z.object({
     confidence: z.number().min(0).max(1).optional(),
   }).optional(),
   personalityMode: z.enum(['professional', 'friendly', 'calm', 'focus', 'silent']).optional(),
+  llmProvider: z.enum(['ollama', 'openrouter', 'gemini', 'online']).optional(),
   ollamaModel: z.enum(['llama3', 'mistral', 'llama3:8b', 'mistral:7b']).optional(),
+  onlineModel: z.string().min(1).max(200).optional(),
 });
 
 export async function sendMessage(req: Request, res: Response, next: NextFunction) {
@@ -23,7 +25,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ error: 'Invalid request', details: parsed.error.issues });
     }
 
-    const { sessionId, message, emotionContext, personalityMode, ollamaModel } = parsed.data;
+    const { sessionId, message, emotionContext, personalityMode, llmProvider, ollamaModel, onlineModel } = parsed.data;
     const sanitizedMessage = sanitizeInput(message);
 
     // Store user message
@@ -41,12 +43,16 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       message: sanitizedMessage,
       emotionContext,
       personalityMode,
+      llmProvider,
       ollamaModel,
+      onlineModel,
     });
+
+    const assistantMessageId = uuidv4();
 
     // Store assistant message
     await memoryService.storeMessage({
-      id: uuidv4(),
+      id: assistantMessageId,
       sessionId,
       role: 'assistant',
       content: response.content,
@@ -55,7 +61,7 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
 
     return res.json({
       success: true,
-      messageId: uuidv4(),
+      messageId: assistantMessageId,
       response: response.content,
       intent: response.intent,
       actions: response.actions,

@@ -4,6 +4,8 @@
   "aiEnginePort": 8000,
   "voiceEnginePort": 8001,
   "frontendPort": 5173,
+  "llmProvider": "openrouter",
+  "onlineModel": "meta-llama/llama-3-8b-instruct",
   "ollama": {
     "url": "http://localhost:11434",
     "model": "llama3"
