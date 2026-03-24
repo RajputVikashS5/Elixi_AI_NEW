@@ -44,6 +44,36 @@ function createMainWindow(): BrowserWindow {
     show: false,
   });
 
+  const trustedOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173', 'file://']);
+  const mediaPermissions = new Set(['media', 'camera', 'microphone']);
+
+  const isTrustedUrl = (url: string): boolean => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'file:') {
+        return true;
+      }
+      return trustedOrigins.has(`${parsed.protocol}//${parsed.host}`);
+    } catch {
+      return false;
+    }
+  };
+
+  win.webContents.session.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+    if (mediaPermissions.has(permission)) {
+      return isTrustedUrl(requestingOrigin);
+    }
+    return false;
+  });
+
+  win.webContents.session.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    if (mediaPermissions.has(permission) && isTrustedUrl(details.requestingUrl)) {
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
   // Content Security Policy
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     const csp = isDev

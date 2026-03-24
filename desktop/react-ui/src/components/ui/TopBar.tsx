@@ -5,9 +5,9 @@ import { useSettingsStore } from '../../store/settingsStore';
 
 export const TopBar: React.FC = () => {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [privacyMode, setPrivacyMode] = useState<'local' | 'cloud'>('local');
-  const { voiceEnabled } = useSettingsStore();
+  const { voiceEnabled, llmProvider } = useSettingsStore();
   const isElectron = !!window.electronAPI;
+  const isCloudProvider = llmProvider === 'openrouter' || llmProvider === 'gemini' || llmProvider === 'online';
 
   useEffect(() => {
     if (!isElectron) return;
@@ -26,15 +26,14 @@ export const TopBar: React.FC = () => {
         <span className="select-none text-xs font-medium tracking-widest text-slate-300 uppercase">
           ELIXI · Intelligence with Empathy
         </span>
-        <button
-          onClick={() => setPrivacyMode((p) => (p === 'local' ? 'cloud' : 'local'))}
-          className="no-drag flex items-center gap-1 rounded-full border border-slate-500/40 px-2 py-0.5 text-[11px] text-slate-300 hover:bg-white/5"
-          title="Privacy processing mode"
+        <div
+          className="no-drag flex items-center gap-1 rounded-full border border-slate-500/40 px-2 py-0.5 text-[11px] text-slate-300"
+          title={`Provider: ${llmProvider}`}
         >
-          <ShieldCheck size={11} className={privacyMode === 'local' ? 'text-emerald-300' : 'text-violet-300'} />
-          {privacyMode === 'local' ? 'Local Processing' : 'Cloud Sync'}
-          {voiceEnabled && privacyMode === 'local' ? ' · Voice On' : ''}
-        </button>
+          <ShieldCheck size={11} className={isCloudProvider ? 'text-violet-300' : 'text-emerald-300'} />
+          {isCloudProvider ? 'Cloud Processing' : 'Local Processing'}
+          {voiceEnabled && !isCloudProvider ? ' · Voice On' : ''}
+        </div>
       </div>
 
       {/* Window controls */}

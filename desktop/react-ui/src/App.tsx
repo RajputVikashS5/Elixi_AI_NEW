@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useSettingsStore } from './store/settingsStore';
 import { Sidebar } from './components/ui/Sidebar';
 import { TopBar } from './components/ui/TopBar';
+import { CameraPreview } from './components/ui/CameraPreview';
 
 const AmbientOrb = lazy(() => import('./components/ui/AmbientOrb').then((m) => ({ default: m.AmbientOrb })));
 const FloatingWidget = lazy(() => import('./components/ui/FloatingWidget').then((m) => ({ default: m.FloatingWidget })));
@@ -49,11 +50,13 @@ const App: React.FC = () => {
           </Suspense>
         )}
 
+        <CameraPreview />
+
         <div className="z-10 m-6 mt-3 flex flex-1 overflow-hidden rounded-[28px] border border-cyan-200/15 bg-slate-950/30 shadow-[0_30px_120px_rgba(2,8,24,0.65)] backdrop-blur-md">
           <main className="relative flex-1 overflow-hidden border-r border-cyan-200/10">
             <Suspense fallback={<div className="h-full w-full" />}>
               <Routes>
-                <Route path="/" element={<Navigate to="/chat" replace />} />
+                <Route path="/" element={<Navigate to="/voice" replace />} />
                 <Route path="/chat" element={<ChatPage />} />
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/automation" element={<AutomationPage />} />

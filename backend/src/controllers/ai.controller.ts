@@ -80,3 +80,19 @@ export async function chatWithAi(req: Request, res: Response, next: NextFunction
     next(err);
   }
 }
+
+export async function getProviderStatus(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const status = await aiService.getProviderStatus();
+    return res.json(status);
+  } catch (err) {
+    logger.error('Provider status check failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    next(err);
+  }
+}
+
+export function getActiveProviderDebug(_req: Request, res: Response) {
+  return res.json(aiService.getActiveProviderDebug());
+}

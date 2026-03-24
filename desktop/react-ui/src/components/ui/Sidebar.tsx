@@ -21,7 +21,8 @@ export const Sidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { emotion } = useEmotionStore();
-  const { personalityMode, setPersonalityMode } = useSettingsStore();
+  const { personalityMode, setPersonalityMode, llmProvider } = useSettingsStore();
+  const isCloudProvider = llmProvider === 'openrouter' || llmProvider === 'gemini' || llmProvider === 'online';
   const { messages } = useChatStore();
   const [memoryRecents, setMemoryRecents] = useState<Array<{ id: string; description: string }>>([]);
   const [activeTab, setActiveTab] = useState<'copilot' | 'recents'>('copilot');
@@ -67,9 +68,14 @@ export const Sidebar: React.FC = () => {
             <p className="text-[11px] text-slate-400">Runtime panel</p>
           </div>
         </div>
-        <div className="flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-1 text-[11px] text-emerald-300">
+        <div className={clsx(
+          'flex items-center gap-1 rounded-full px-2 py-1 text-[11px]',
+          isCloudProvider
+            ? 'border border-violet-400/30 bg-violet-400/10 text-violet-300'
+            : 'border border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+        )}>
           <ShieldCheck size={11} />
-          Local
+          {isCloudProvider ? 'Cloud' : 'Local'}
         </div>
       </div>
 

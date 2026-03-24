@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useSettingsStore, PersonalityMode, LlmProvider, OllamaModel } from '../store/settingsStore';
 import { voiceService, VoiceEntry } from '../services/voiceService';
+import { api } from '../services/api';
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div className="space-y-3">
@@ -79,9 +80,32 @@ const Slider: React.FC<{
   </div>
 );
 
+type ProviderStatusResponse = {
+  timestamp: string;
+  openrouter: { configured: boolean; connected: boolean; model: string; detail: string };
+  gemini: { configured: boolean; connected: boolean; model: string; detail: string };
+};
+
+type ActiveProviderResponse = {
+  provider: string;
+  model: string;
+  requestedProvider: string;
+  timestamp: string;
+  source: string;
+};
+
+const StatusDot: React.FC<{ ok: boolean }> = ({ ok }) => (
+  <span
+    className={`inline-block h-2.5 w-2.5 rounded-full ${ok ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.65)]' : 'bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.55)]'}`}
+  />
+);
+
 const SettingsPage: React.FC = () => {
   const settings = useSettingsStore();
   const [voices, setVoices] = useState<VoiceEntry[]>([]);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
+  const [activeProvider, setActiveProvider] = useState<ActiveProviderResponse | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
 
   // Load available SAPI voices from voice engine
   useEffect(() => {
@@ -106,6 +130,27 @@ const SettingsPage: React.FC = () => {
     },
     [],
   );
+
+  const refreshProviderStatus = useCallback(async () => {
+    setStatusLoading(true);
+    try {
+      const [statusRes, activeRes] = await Promise.all([
+        api.get<ProviderStatusResponse>('/ai/providers/status'),
+        api.get<ActiveProviderResponse>('/ai/providers/active'),
+      ]);
+      setProviderStatus(statusRes.data);
+      setActiveProvider(activeRes.data);
+    } catch {
+      setProviderStatus(null);
+      setActiveProvider(null);
+    } finally {
+      setStatusLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshProviderStatus();
+  }, [refreshProviderStatus]);
 
   const personalityOptions: { value: PersonalityMode; label: string }[] = [
     { value: 'professional', label: 'Professional' },
@@ -194,6 +239,52 @@ const SettingsPage: React.FC = () => {
             className="bg-elixi-bg border border-elixi-border rounded-lg px-3 py-1.5 text-sm text-elixi-text outline-none focus:border-elixi-primary/50 selectable w-52"
           />
         </SettingRow>
+
+        <div className="border-t border-elixi-border pt-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-elixi-text">Provider Status</p>
+            <button
+              type="button"
+              onClick={() => void refreshProviderStatus()}
+              disabled={statusLoading}
+              className="text-xs px-2 py-1 rounded border border-elixi-border text-elixi-muted hover:text-elixi-text hover:border-elixi-primary/50 disabled:opacity-60"
+            >
+              {statusLoading ? 'Checking...' : 'Refresh'}
+            </button>
+          </div>
+
+          {providerStatus ? (
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between rounded-md border border-elixi-border bg-elixi-bg/60 px-2 py-1.5">
+                <div className="flex items-center gap-2">
+                  <StatusDot ok={providerStatus.openrouter.connected} />
+                  <span className="text-elixi-text">OpenRouter</span>
+                </div>
+                <span className="text-elixi-muted">{providerStatus.openrouter.model}</span>
+              </div>
+              <p className="text-[11px] text-elixi-muted -mt-1">{providerStatus.openrouter.detail}</p>
+
+              <div className="flex items-center justify-between rounded-md border border-elixi-border bg-elixi-bg/60 px-2 py-1.5">
+                <div className="flex items-center gap-2">
+                  <StatusDot ok={providerStatus.gemini.connected} />
+                  <span className="text-elixi-text">Gemini</span>
+                </div>
+                <span className="text-elixi-muted">{providerStatus.gemini.model}</span>
+              </div>
+              <p className="text-[11px] text-elixi-muted -mt-1">{providerStatus.gemini.detail}</p>
+
+              {activeProvider ? (
+                <div className="rounded-md border border-elixi-border bg-elixi-bg/60 px-2 py-2 space-y-1">
+                  <p className="text-elixi-text">Active: {activeProvider.provider}</p>
+                  <p className="text-elixi-muted">Model: {activeProvider.model}</p>
+                  <p className="text-elixi-muted">Requested: {activeProvider.requestedProvider}</p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-xs text-rose-300">Provider status unavailable. Verify backend URL and restart backend.</p>
+          )}
+        </div>
       </Section>
 
       <Section title="Voice">

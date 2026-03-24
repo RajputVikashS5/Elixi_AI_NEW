@@ -1,5 +1,55 @@
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import { logger } from '../utils/logger';
+
+function loadFallbackEnvFromAiEngine(): void {
+  const envCandidates = [
+    path.resolve(__dirname, '../../.env.local'),
+    path.resolve(__dirname, '../../.env'),
+    path.resolve(__dirname, '../../../ai-engine/.env.local'),
+    path.resolve(__dirname, '../../../ai-engine/.env'),
+  ];
+
+  for (const envPath of envCandidates) {
+    try {
+      if (!fs.existsSync(envPath)) {
+        continue;
+      }
+
+      const raw = fs.readFileSync(envPath, 'utf8');
+      for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+          continue;
+        }
+
+        const eqIndex = trimmed.indexOf('=');
+        if (eqIndex <= 0) {
+          continue;
+        }
+
+        const key = trimmed.slice(0, eqIndex).trim();
+        let value = trimmed.slice(eqIndex + 1).trim();
+
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+
+        if (!process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    } catch (err) {
+      logger.warn('Unable to load fallback env file', {
+        envPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+loadFallbackEnvFromAiEngine();
 
 const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://localhost:8000';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
@@ -15,6 +65,30 @@ const GEMINI_MODEL_CANDIDATES = [
 ].filter((model): model is string => Boolean(model && model.trim()));
 
 type ChatProvider = 'gemini' | 'openrouter' | 'ollama';
+
+interface ProviderReply {
+  reply: string;
+  model: string;
+}
+
+interface ProviderDiagnostics {
+  provider: ChatProvider | 'ai-engine' | 'unknown';
+  model: string;
+  requestedProvider: string;
+  timestamp: string;
+  source: 'fallback-router' | 'ai-engine-router' | 'none';
+  status: 'idle' | 'success' | 'failed';
+  error?: string;
+}
+
+let lastProviderDiagnostics: ProviderDiagnostics = {
+  provider: 'unknown',
+  model: 'unknown',
+  requestedProvider: 'unknown',
+  timestamp: new Date(0).toISOString(),
+  source: 'none',
+  status: 'idle',
+};
 
 interface ProviderSelection {
   preferred: ChatProvider;
@@ -50,6 +124,7 @@ export interface AiChatRequest {
 export interface AiChatResult {
   success: true;
   provider: ChatProvider;
+  model: string;
   reply: string;
 }
 
@@ -195,6 +270,40 @@ function buildSystemPrompt(request: AiChatRequest): string {
   ].join(' ');
 }
 
+function getGeminiModelCandidates(request: AiChatRequest): string[] {
+  const requestedModel = request.onlineModel?.trim();
+  if (requestedModel && /^gemini-/i.test(requestedModel)) {
+    return [requestedModel, ...GEMINI_MODEL_CANDIDATES.filter((m) => m !== requestedModel)];
+  }
+  return GEMINI_MODEL_CANDIDATES;
+}
+
+function getOpenRouterModel(request: AiChatRequest, isComplex: boolean): string {
+  const requestedModel = request.onlineModel?.trim();
+
+  // Ignore Gemini-only IDs when routing through OpenRouter fallback.
+  if (!requestedModel || /^gemini-/i.test(requestedModel)) {
+    return process.env.OPENROUTER_MODEL
+      || (isComplex ? 'mistralai/mixtral-8x7b-instruct' : 'meta-llama/llama-3-8b-instruct');
+  }
+
+  return requestedModel;
+}
+
+function getOllamaModel(request: AiChatRequest, isComplex: boolean): string {
+  return request.ollamaModel || process.env.OLLAMA_MODEL || (isComplex ? 'mistral' : 'llama3');
+}
+
+function getAttemptedModel(provider: ChatProvider, request: AiChatRequest, isComplex: boolean): string {
+  if (provider === 'gemini') {
+    return getGeminiModelCandidates(request)[0] || process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  }
+  if (provider === 'openrouter') {
+    return getOpenRouterModel(request, isComplex);
+  }
+  return getOllamaModel(request, isComplex);
+}
+
 function isGeminiModelNotFoundError(err: unknown): boolean {
   if (!axios.isAxiosError(err)) {
     return false;
@@ -241,23 +350,20 @@ async function callGeminiModel(apiKey: string, model: string, request: AiChatReq
   return reply;
 }
 
-async function callGemini(request: AiChatRequest): Promise<string> {
+async function callGemini(request: AiChatRequest): Promise<ProviderReply> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('Missing GEMINI_API_KEY');
   }
 
-  const requestedModel = request.onlineModel?.trim();
-  const modelCandidates = requestedModel && /^gemini-/i.test(requestedModel)
-    ? [requestedModel, ...GEMINI_MODEL_CANDIDATES.filter((m) => m !== requestedModel)]
-    : GEMINI_MODEL_CANDIDATES;
+  const modelCandidates = getGeminiModelCandidates(request);
 
   let lastError: unknown;
   for (const model of modelCandidates) {
     try {
       const reply = await callGeminiModel(apiKey, model, request);
       logger.info('Gemini model selected', { model });
-      return reply;
+      return { reply, model };
     } catch (err) {
       lastError = err;
       if (!isGeminiModelNotFoundError(err)) {
@@ -274,13 +380,13 @@ async function callGemini(request: AiChatRequest): Promise<string> {
   throw lastError instanceof Error ? lastError : new Error('All Gemini model candidates failed');
 }
 
-async function callOpenRouter(request: AiChatRequest, isComplex: boolean): Promise<string> {
+async function callOpenRouter(request: AiChatRequest, isComplex: boolean): Promise<ProviderReply> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new Error('Missing OPENROUTER_API_KEY');
   }
 
-  const model = request.onlineModel || (isComplex ? 'mistralai/mixtral-8x7b-instruct' : 'meta-llama/llama-3-8b-instruct');
+  const model = getOpenRouterModel(request, isComplex);
 
   const response = await axios.post(
     OPENROUTER_API_URL,
@@ -309,11 +415,11 @@ async function callOpenRouter(request: AiChatRequest, isComplex: boolean): Promi
     throw new Error('OpenRouter returned empty response');
   }
 
-  return reply;
+  return { reply, model };
 }
 
-async function callOllama(request: AiChatRequest, isComplex: boolean): Promise<string> {
-  const model = request.ollamaModel || process.env.OLLAMA_MODEL || (isComplex ? 'mistral' : 'llama3');
+async function callOllama(request: AiChatRequest, isComplex: boolean): Promise<ProviderReply> {
+  const model = getOllamaModel(request, isComplex);
   const prompt = `${buildSystemPrompt(request)}\n\nUser: ${request.message}`;
 
   const response = await axios.post(
@@ -333,7 +439,7 @@ async function callOllama(request: AiChatRequest, isComplex: boolean): Promise<s
     throw new Error('Ollama returned empty response');
   }
 
-  return reply;
+  return { reply, model };
 }
 
 export const aiService = {
@@ -353,8 +459,9 @@ export const aiService = {
     const failures: string[] = [];
 
     for (const provider of providerChain) {
+      const attemptedModel = getAttemptedModel(provider, request, routing.isComplex);
       try {
-        const reply = await executeWithRetry(provider, async () => {
+        const providerResult = await executeWithRetry(provider, async () => {
           if (provider === 'gemini') {
             return callGemini(request);
           }
@@ -368,16 +475,37 @@ export const aiService = {
           provider,
           complex: routing.isComplex,
           messageLength: request.message.length,
+          model: providerResult.model,
         });
+
+        lastProviderDiagnostics = {
+          provider,
+          model: providerResult.model,
+          requestedProvider: requestedProvider || 'auto',
+          timestamp: new Date().toISOString(),
+          source: 'fallback-router',
+          status: 'success',
+          error: undefined,
+        };
 
         return {
           success: true,
           provider,
-          reply,
+          model: providerResult.model,
+          reply: providerResult.reply,
         };
       } catch (err) {
         const reason = normalizeErrorMessage(err);
         failures.push(`${provider}: ${reason}`);
+        lastProviderDiagnostics = {
+          provider,
+          model: attemptedModel,
+          requestedProvider: requestedProvider || 'auto',
+          timestamp: new Date().toISOString(),
+          source: 'fallback-router',
+          status: 'failed',
+          error: reason,
+        };
         logger.error('AI provider failed and fallback will continue', {
           provider,
           reason,
@@ -394,8 +522,32 @@ export const aiService = {
       const res = await axios.post<ChatResponse>(`${AI_ENGINE_URL}/ai/chat`, request, {
         timeout: 60_000,
       });
+
+      lastProviderDiagnostics = {
+        provider: 'ai-engine',
+        model: request.llmProvider === 'ollama'
+          ? (request.ollamaModel || process.env.OLLAMA_MODEL || 'llama3')
+          : (request.onlineModel || process.env.OPENROUTER_MODEL || process.env.GEMINI_MODEL || 'default'),
+        requestedProvider: request.llmProvider || 'auto',
+        timestamp: new Date().toISOString(),
+        source: 'ai-engine-router',
+        status: 'success',
+        error: undefined,
+      };
+
       return res.data;
     } catch (err) {
+      lastProviderDiagnostics = {
+        provider: 'ai-engine',
+        model: request.llmProvider === 'ollama'
+          ? (request.ollamaModel || process.env.OLLAMA_MODEL || 'llama3')
+          : (request.onlineModel || process.env.OPENROUTER_MODEL || process.env.GEMINI_MODEL || 'default'),
+        requestedProvider: request.llmProvider || 'auto',
+        timestamp: new Date().toISOString(),
+        source: 'ai-engine-router',
+        status: 'failed',
+        error: normalizeErrorMessage(err),
+      };
       logger.error('AI Engine chat error:', err);
       throw new Error('AI Engine unavailable. Please ensure it is running on port 8000.');
     }
@@ -522,5 +674,68 @@ export const aiService = {
       logger.error('AI Engine habit diagnostics error:', err);
       throw new Error('Failed to retrieve habit suggestion diagnostics.');
     }
+  },
+
+  async getProviderStatus(): Promise<{
+    timestamp: string;
+    openrouter: { configured: boolean; connected: boolean; model: string; detail: string };
+    gemini: { configured: boolean; connected: boolean; model: string; detail: string };
+  }> {
+    const openrouterKey = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+    const geminiKey = Boolean(process.env.GEMINI_API_KEY?.trim());
+
+    const openrouter = {
+      configured: openrouterKey,
+      connected: false,
+      model: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3-8b-instruct',
+      detail: openrouterKey ? 'Checking...' : 'Missing OPENROUTER_API_KEY',
+    };
+
+    const gemini = {
+      configured: geminiKey,
+      connected: false,
+      model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+      detail: geminiKey ? 'Checking...' : 'Missing GEMINI_API_KEY',
+    };
+
+    if (openrouterKey) {
+      try {
+        await axios.get('https://openrouter.ai/api/v1/models', {
+          timeout: 5000,
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'http://localhost',
+            'X-Title': process.env.OPENROUTER_APP_NAME || 'Elixi Backend',
+          },
+        });
+        openrouter.connected = true;
+        openrouter.detail = 'OK';
+      } catch (err) {
+        openrouter.detail = normalizeErrorMessage(err);
+      }
+    }
+
+    if (geminiKey) {
+      try {
+        await axios.get(`${GEMINI_API_URL}/models`, {
+          timeout: 5000,
+          params: { key: process.env.GEMINI_API_KEY },
+        });
+        gemini.connected = true;
+        gemini.detail = 'OK';
+      } catch (err) {
+        gemini.detail = normalizeErrorMessage(err);
+      }
+    }
+
+    return {
+      timestamp: new Date().toISOString(),
+      openrouter,
+      gemini,
+    };
+  },
+
+  getActiveProviderDebug(): ProviderDiagnostics {
+    return lastProviderDiagnostics;
   },
 };

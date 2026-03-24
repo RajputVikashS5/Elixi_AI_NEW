@@ -50,6 +50,11 @@ OPENROUTER_API_KEY=your_openrouter_key_here
 OPENROUTER_MODEL=meta-llama/llama-3-8b-instruct
 OPENROUTER_SITE_URL=http://localhost
 OPENROUTER_APP_NAME=Elixi AI Engine
+
+# Camera startup behavior (optional)
+ELIXI_CAMERA_AUTO_ENABLE=false
+# Alias supported by startup parser:
+ELIXI_CAMERA_ENABLED=false
 ```
 
 Then select **OpenRouter (cloud)** or **Google Gemini (cloud)** in the app settings page under **AI Model → LLM Provider**.

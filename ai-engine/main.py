@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+# Prefer developer-local secrets, then shared defaults.
+load_dotenv('.env.local', override=False)
 load_dotenv()
 
 # Disable Chroma product telemetry to avoid noisy Posthog compatibility errors.
@@ -25,6 +27,7 @@ from routers.emotion_router import router as emotion_router
 from routers.task_router import router as task_router
 from memory_engine.long_term_memory import init_database
 from memory_engine.habit_summarizer import HabitSummarizer
+from emotion_engine.camera_manager import get_camera_manager, shutdown_camera
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +44,14 @@ ALLOWED_ORIGINS = [
 # Global references for background jobs
 scheduler: AsyncIOScheduler | None = None
 habit_summarizer: HabitSummarizer | None = None
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Parse a boolean environment variable with sensible truthy values."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 async def _run_habit_summarization() -> None:
@@ -61,6 +72,17 @@ async def lifespan(app: FastAPI):
 
     logger.info("ELIXI AI Engine starting up...")
     await init_database()
+
+    # Initialize camera manager (privacy-first). Auto-enable can be controlled by env flag.
+    camera_manager = get_camera_manager(enabled=False)
+    auto_enable_camera = _env_bool("ELIXI_CAMERA_AUTO_ENABLE", _env_bool("ELIXI_CAMERA_ENABLED", False))
+    if auto_enable_camera:
+        if camera_manager.enable():
+            logger.info("Camera emotion detection auto-enabled via environment flag")
+        else:
+            logger.warning("Camera auto-enable requested but initialization failed")
+    else:
+        logger.info("Camera emotion detection available (disabled by default). Set ELIXI_CAMERA_AUTO_ENABLE=true to enable on startup")
 
     # Initialize habit summarizer and schedule periodic job
     habit_summarizer = HabitSummarizer()
@@ -86,6 +108,10 @@ async def lifespan(app: FastAPI):
     # Cleanup on shutdown
     if scheduler and scheduler.running:
         scheduler.shutdown()
+    
+    # Shutdown camera resources
+    shutdown_camera()
+    
     logger.info("ELIXI AI Engine shutting down...")
 
 
