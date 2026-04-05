@@ -6,6 +6,7 @@ import { sanitizeInput } from '../utils/sanitizer';
 import { memoryService } from './memory.service';
 import { automationService, WorkflowPermissionError, WorkflowProgressEvent } from './automation.service';
 import { voiceService } from './voice.service';
+import { getAiEngineAuthHeaders } from './aiAuth.service';
 
 const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://127.0.0.1:8000';
 const AI_READY_TIMEOUT_MS = 45_000;
@@ -121,6 +122,7 @@ export function setupSocketHandlers(io: SocketServer): void {
 
           for (let attempt = 1; attempt <= 8; attempt++) {
             try {
+              const headers = await getAiEngineAuthHeaders();
               return await axios.post(
                 `${AI_ENGINE_URL}/ai/chat`,
                 {
@@ -136,6 +138,7 @@ export function setupSocketHandlers(io: SocketServer): void {
                 {
                   responseType: 'stream',
                   timeout: 150_000,
+                  headers,
                 }
               );
             } catch (err) {
@@ -299,10 +302,11 @@ export function setupSocketHandlers(io: SocketServer): void {
       webcam_eye_strain?: number;
     }) => {
       try {
+        const headers = await getAiEngineAuthHeaders();
         const res = await axios.post<{ state: string; confidence: number }>(
           `${AI_ENGINE_URL}/ai/emotion`,
           data,
-          { timeout: 5_000 }
+          { timeout: 5_000, headers }
         );
         socket.emit('emotion:update', res.data);
       } catch (err) {
@@ -381,7 +385,10 @@ export function setupSocketHandlers(io: SocketServer): void {
           channels,
         });
         if (!forwarded) {
-          socket.emit('voice:status', { status: 'idle', error: true });
+          // Stream may still be opening; drop frame quietly to avoid false idle/error churn.
+          logger.debug('voice:audio dropped frame (stream not ready)', {
+            socketId: socket.id,
+          });
         }
       } catch (err) {
         logger.warn('voice:audio processing failed', {

@@ -1,14 +1,54 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useSettingsStore } from '../store/settingsStore';
 import { useChatStore } from '../store/chatStore';
 import { useEmotionStore } from '../store/emotionStore';
 import { useVoiceStore } from '../store/voiceStore';
 import { voiceService } from '../services/voiceService';
+import { ActionResult } from '../store/chatStore';
 
 let socket: Socket | null = null;
 let socketBaseUrl: string | null = null;
 const STREAM_TIMEOUT_MS = 90_000;
+
+function normalizeActions(actions: unknown[] | undefined): ActionResult[] | undefined {
+  if (!Array.isArray(actions) || actions.length === 0) {
+    return undefined;
+  }
+
+  const normalized = actions
+    .map((raw) => {
+      if (!raw || typeof raw !== 'object') {
+        return null;
+      }
+
+      const source = raw as {
+        type?: unknown;
+        target?: unknown;
+        status?: unknown;
+        error?: unknown;
+      };
+
+      const type = typeof source.type === 'string' && source.type.trim().length > 0
+        ? source.type
+        : 'action';
+      const status = source.status === 'executed' || source.status === 'failed' || source.status === 'pending'
+        ? source.status
+        : 'pending';
+
+      return {
+        type,
+        target: typeof source.target === 'string' ? source.target : undefined,
+        status,
+        error: typeof source.error === 'string' ? source.error : undefined,
+      } satisfies ActionResult;
+    })
+    .filter((item): item is ActionResult => Boolean(item));
+
+  return normalized.length ? normalized : undefined;
+}
+
+export type SocketConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed';
 
 export type AutomationProgressStatus = 'started' | 'running' | 'success' | 'failed' | 'completed';
 
@@ -42,7 +82,12 @@ interface AutomationCompletePayload {
   message?: string;
 }
 
-export function useSocket() {
+interface UseSocketOptions {
+  enableRealtimeHandlers?: boolean;
+}
+
+export function useSocket(options: UseSocketOptions = {}) {
+  const enableRealtimeHandlers = options.enableRealtimeHandlers ?? true;
   const { backendUrl, voiceEnabled } = useSettingsStore();
   const { appendToken, updateMessage, setStreaming } = useChatStore();
   const { updateEmotion } = useEmotionStore();
@@ -50,6 +95,8 @@ export function useSocket() {
   const currentMsgId = useRef<string | null>(null);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
   const streamTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [connectionState, setConnectionState] = useState<SocketConnectionState>('connecting');
+  const [connectionError, setConnectionError] = useState<string>('Connecting to backend...');
 
   const clearStreamWatchdog = useCallback(() => {
     if (streamTimeoutRef.current) {
@@ -123,27 +170,36 @@ export function useSocket() {
   }, [setStatus, voiceEnabled]);
 
   useEffect(() => {
-    if (socket && socketBaseUrl === backendUrl) return;
-
     if (socket && socketBaseUrl !== backendUrl) {
       socket.disconnect();
       socket = null;
+      socketBaseUrl = null;
     }
 
-    socket = io(backendUrl, {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
-    socketBaseUrl = backendUrl;
+    if (!socket) {
+      setConnectionState('connecting');
+      setConnectionError(`Connecting to backend at ${backendUrl}...`);
+
+      socket = io(backendUrl, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+      });
+      socketBaseUrl = backendUrl;
+    }
 
     const onConnect = () => {
       console.log('[ELIXI] Socket connected');
+      setConnectionState('connected');
+      setConnectionError('');
     };
 
     const onDisconnect = () => {
       console.log('[ELIXI] Socket disconnected');
+      setConnectionState('disconnected');
+      setConnectionError(`Backend disconnected. ELIXI cannot chat until ${backendUrl} is available.`);
       const pendingId = currentMsgId.current;
       if (!pendingId) {
         setStreaming(false);
@@ -164,6 +220,26 @@ export function useSocket() {
       currentMsgId.current = null;
       setStreaming(false);
       clearStreamWatchdog();
+    };
+
+    const onConnectError = (err: Error) => {
+      setConnectionState('failed');
+      setConnectionError(`Unable to reach backend at ${backendUrl}: ${err.message}`);
+    };
+
+    const onReconnectAttempt = () => {
+      setConnectionState('reconnecting');
+      setConnectionError(`Reconnecting to backend at ${backendUrl}...`);
+    };
+
+    const onReconnect = () => {
+      setConnectionState('connected');
+      setConnectionError('');
+    };
+
+    const onReconnectFailed = () => {
+      setConnectionState('failed');
+      setConnectionError(`Unable to reconnect to backend at ${backendUrl}.`);
     };
 
     const onChatToken = ({ token }: { token: string }) => {
@@ -190,9 +266,11 @@ export function useSocket() {
           ? message
           : undefined;
 
+        const normalizedActions = normalizeActions(actions);
+
         updateMessage(currentMsgId.current, {
           isStreaming: false,
-          actions: actions as never,
+          actions: normalizedActions,
           intent,
           ...(nextContent ? { content: nextContent } : {}),
           ...(error ? { intent: intent || 'chat.error' } : {}),
@@ -267,25 +345,47 @@ export function useSocket() {
       setStatus(status);
     };
 
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('chat:token', onChatToken);
-    socket.on('chat:complete', onChatComplete);
-    socket.on('emotion:update', onEmotionUpdate);
-    socket.on('voice:transcript', onVoiceTranscript);
-    socket.on('voice:status', onVoiceStatus);
+    if (enableRealtimeHandlers) {
+      socket.on('connect', onConnect);
+      socket.on('disconnect', onDisconnect);
+      socket.on('connect_error', onConnectError);
+      socket.on('reconnect_attempt', onReconnectAttempt);
+      socket.on('reconnect', onReconnect);
+      socket.on('reconnect_failed', onReconnectFailed);
+      socket.on('chat:token', onChatToken);
+      socket.on('chat:complete', onChatComplete);
+      socket.on('emotion:update', onEmotionUpdate);
+      socket.on('voice:transcript', onVoiceTranscript);
+      socket.on('voice:status', onVoiceStatus);
+    }
+
+    // Ensure state is accurate when reusing an already-connected singleton socket.
+    if (enableRealtimeHandlers && socket.connected) {
+      setConnectionState('connected');
+      setConnectionError('');
+    } else if (enableRealtimeHandlers) {
+      setConnectionState('reconnecting');
+      setConnectionError(`Reconnecting to backend at ${backendUrl}...`);
+      socket.connect();
+    }
 
     return () => {
       clearStreamWatchdog();
-      socket?.off('connect', onConnect);
-      socket?.off('disconnect', onDisconnect);
-      socket?.off('chat:token', onChatToken);
-      socket?.off('chat:complete', onChatComplete);
-      socket?.off('emotion:update', onEmotionUpdate);
-      socket?.off('voice:transcript', onVoiceTranscript);
-      socket?.off('voice:status', onVoiceStatus);
+      if (enableRealtimeHandlers) {
+        socket?.off('connect', onConnect);
+        socket?.off('disconnect', onDisconnect);
+        socket?.off('connect_error', onConnectError);
+        socket?.off('reconnect_attempt', onReconnectAttempt);
+        socket?.off('reconnect', onReconnect);
+        socket?.off('reconnect_failed', onReconnectFailed);
+        socket?.off('chat:token', onChatToken);
+        socket?.off('chat:complete', onChatComplete);
+        socket?.off('emotion:update', onEmotionUpdate);
+        socket?.off('voice:transcript', onVoiceTranscript);
+        socket?.off('voice:status', onVoiceStatus);
+      }
     };
-  }, [backendUrl, appendToken, clearStreamWatchdog, playAssistantTts, startStreamWatchdog, updateMessage, setStreaming, updateEmotion, setStatus, setTranscript]);
+  }, [backendUrl, appendToken, clearStreamWatchdog, enableRealtimeHandlers, playAssistantTts, startStreamWatchdog, updateMessage, setStreaming, updateEmotion, setStatus, setTranscript]);
 
   const sendMessage = useCallback((
     message: string,
@@ -410,6 +510,8 @@ export function useSocket() {
     stopVoiceSession,
     sendVoiceAudio,
     runWorkflowWithProgress,
-    isConnected: socket?.connected ?? false,
+    isConnected: connectionState === 'connected',
+    connectionState,
+    connectionError,
   };
 }

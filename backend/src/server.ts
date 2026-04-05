@@ -1,4 +1,5 @@
 import express from 'express';
+import axios from 'axios';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import cors from 'cors';
@@ -14,6 +15,7 @@ import { systemRoutes } from './routes/system.routes';
 import { aiRoutes } from './routes/ai.routes';
 import { setupSocketHandlers } from './services/socket.service';
 import { initializeDatabase } from './services/memory.service';
+import { getAiEngineAuthHeaders } from './services/aiAuth.service';
 import { logger } from './utils/logger';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -47,7 +49,6 @@ async function bootstrap() {
   app.use('/api/automation', createRateLimiter({ windowMs: 60_000, max: 30 }));
   app.use('/api/', createRateLimiter({ windowMs: 60_000, max: 200 }));
 
-  // Routes
   app.use('/ai', aiRoutes);
   app.use('/api/chat', chatRoutes);
   app.use('/api/automation', automationRoutes);
@@ -56,6 +57,7 @@ async function bootstrap() {
   app.use('/api/system', systemRoutes);
 
   // Health check
+  // Socket.io
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', version: '1.0.0', timestamp: new Date().toISOString() });
   });

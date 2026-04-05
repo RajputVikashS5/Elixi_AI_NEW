@@ -1,9 +1,6 @@
-"""
-ELIXI AI Engine – FastAPI entry point
-Serves LLM inference, intent classification, emotion detection, and memory.
-"""
+"""ELIXI AI Engine – production-ready FastAPI entry point."""
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -12,38 +9,44 @@ from dotenv import load_dotenv
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from core.config import load_settings, validate_settings, Settings
+from core.errors import register_exception_handlers
+from core.logging import configure_logging
+from core.security import configure_security, require_auth
+from middleware.request_logging import RequestLoggingMiddleware
+from middleware.rate_limit import RateLimitMiddleware
+
 # Prefer developer-local secrets, then shared defaults.
 load_dotenv('.env.local', override=False)
 load_dotenv()
+
+settings: Settings = load_settings()
+validate_settings(settings)
+configure_security(settings)
+configure_logging()
 
 # Disable Chroma product telemetry to avoid noisy Posthog compatibility errors.
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "FALSE")
 os.environ.setdefault("CHROMA_PRODUCT_TELEMETRY_IMPL", "chroma_telemetry.NullTelemetry")
 os.environ.setdefault("CHROMA_TELEMETRY_IMPL", "chroma_telemetry.NullTelemetry")
 
+from routers.auth_router import router as auth_router
 from routers.chat_router import router as chat_router
 from routers.memory_router import router as memory_router
 from routers.emotion_router import router as emotion_router
 from routers.task_router import router as task_router
 from memory_engine.long_term_memory import init_database
+from memory_engine.long_term_memory import LongTermMemory
 from memory_engine.habit_summarizer import HabitSummarizer
 from emotion_engine.camera_manager import get_camera_manager, shutdown_camera
+from services.memory_retention_service import MemoryRetentionService
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 logger = logging.getLogger("elixi.ai")
-
-ALLOWED_ORIGINS = [
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "http://localhost:5173",
-]
 
 # Global references for background jobs
 scheduler: AsyncIOScheduler | None = None
 habit_summarizer: HabitSummarizer | None = None
+retention_service = MemoryRetentionService(settings=settings, memory=LongTermMemory())
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -65,12 +68,19 @@ async def _run_habit_summarization() -> None:
         logger.error("Habit summarization job failed: %s", exc)
 
 
+async def _run_memory_retention() -> None:
+    try:
+        await retention_service.enforce_global()
+    except Exception as exc:
+        logger.error("Memory retention job failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize resources on startup, clean up on shutdown."""
     global scheduler, habit_summarizer
 
-    logger.info("ELIXI AI Engine starting up...")
+    logger.info("%s starting up...", settings.app_name)
     await init_database()
 
     # Initialize camera manager (privacy-first). Auto-enable can be controlled by env flag.
@@ -96,11 +106,19 @@ async def lifespan(app: FastAPI):
         id="habit_summarization",
         name="Periodic Habit Summarization",
     )
+    scheduler.add_job(
+        _run_memory_retention,
+        "interval",
+        minutes=30,
+        id="memory_retention",
+        name="Periodic Memory Retention",
+    )
 
     scheduler.start()
     # Prime summary metadata immediately so suggestions improve without waiting 2 hours.
     await _run_habit_summarization()
-    logger.info("Habit summarization job scheduled (every 2 hours)")
+    await _run_memory_retention()
+    logger.info("Habit summarization and memory retention jobs scheduled")
     logger.info("AI Engine ready on http://localhost:8000")
 
     yield
@@ -116,29 +134,42 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="ELIXI AI Engine",
+    title=settings.app_name,
     description="Local AI inference engine for ELIXI desktop assistant",
-    version="1.0.0",
+    version=settings.app_version,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url=None,
 )
 
+register_exception_handlers(app)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RateLimitMiddleware, settings=settings)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # Register routers
-app.include_router(chat_router, prefix="/ai", tags=["Chat"])
-app.include_router(memory_router, prefix="/memory", tags=["Memory"])
-app.include_router(emotion_router, prefix="/ai", tags=["Emotion"])
-app.include_router(task_router, prefix="/tasks", tags=["Tasks"])
+app.include_router(auth_router, prefix="/auth", tags=["Auth"])
+auth_deps = [Depends(require_auth)]
+app.include_router(chat_router, prefix="/ai", tags=["Chat"], dependencies=auth_deps)
+app.include_router(memory_router, prefix="/memory", tags=["Memory"], dependencies=auth_deps)
+app.include_router(emotion_router, prefix="/ai", tags=["Emotion"], dependencies=auth_deps)
+app.include_router(task_router, prefix="/tasks", tags=["Tasks"], dependencies=auth_deps)
 
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    return {"status": "ok", "version": "1.0.0"}
+    """Health check endpoint for load balancers and health monitors."""
+    return {
+        "status": "ok",
+        "version": settings.app_version,
+        "environment": settings.environment,
+        "service": "elixi-ai-engine",
+        "timestamp": __import__('datetime').datetime.utcnow().isoformat(),
+    }

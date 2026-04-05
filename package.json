@@ -9,10 +9,11 @@
   ],
   "scripts": {
     "predev": "node scripts/cleanup-dev-ports.cjs",
+    "predev:web": "node scripts/cleanup-dev-ports.cjs",
     "dev": "npm run dev:web",
     "dev:all": "npm run dev",
-    "dev:core": "concurrently \"npm run dev:ai\" \"npm run dev:backend\" \"npm run dev:ui\"",
-    "dev:web": "concurrently \"npm run dev:ai\" \"npm run dev:backend\" \"npm run dev:ui\"",
+    "dev:core": "concurrently \"npm run dev:ai\" \"npm run dev:voice\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:web": "concurrently \"npm run dev:ai\" \"npm run dev:voice\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
     "dev:all-with-voice": "concurrently \"npm run dev:ai\" \"npm run dev:voice\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
     "dev:ai": "npm run start:ai",
     "dev:voice": "npm run start:voice",
@@ -25,7 +26,7 @@
     "test:phase12": "powershell -ExecutionPolicy Bypass -File ./scripts/phase12-regression.ps1",
     "test:db": "cd backend && npx ts-node ../scripts/test-db-connections.ts",
     "start:ai": "cd ai-engine && ..\\.venv\\Scripts\\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
-    "start:voice": "cd voice-engine && ..\\.venv\\Scripts\\python.exe -m uvicorn voice_server:app --host 0.0.0.0 --port 8001 --reload"
+    "start:voice": "cd voice-engine && ..\\.venv\\Scripts\\python.exe -m uvicorn voice_server:app --host 0.0.0.0 --port 8001"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

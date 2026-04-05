@@ -1,6 +1,8 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useSettingsStore } from './store/settingsStore';
+import { useVoiceStore } from './store/voiceStore';
+import { voiceService } from './services/voiceService';
 import { Sidebar } from './components/ui/Sidebar';
 import { TopBar } from './components/ui/TopBar';
 import { CameraPreview } from './components/ui/CameraPreview';
@@ -15,9 +17,12 @@ const AutomationPage = lazy(() => import('./pages/AutomationPage'));
 const MemoryPage = lazy(() => import('./pages/MemoryPage'));
 const VoicePage = lazy(() => import('./pages/VoicePage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const STARTUP_GREETING_SESSION_KEY = 'elixi_startup_greeted';
+const STARTUP_GREETING_TEXT = 'Hello. ELIXI is online and ready to help you.';
 
 const App: React.FC = () => {
   const { personalityMode } = useSettingsStore();
+  const { setStatus } = useVoiceStore();
   const [showEnhancements, setShowEnhancements] = useState(false);
 
   useEffect(() => {
@@ -29,6 +34,73 @@ const App: React.FC = () => {
       window.clearTimeout(timer);
     };
   }, []);
+
+  useEffect(() => {
+    let canceled = false;
+
+    const hasGreeted = window.sessionStorage.getItem(STARTUP_GREETING_SESSION_KEY) === '1';
+    if (hasGreeted) {
+      return;
+    }
+
+    const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+    const greetOnStartup = async () => {
+      try {
+        let healthy = false;
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const status = await voiceService.getStatus();
+          if (status.engineHealthy) {
+            healthy = true;
+            break;
+          }
+          await sleep(1000 * (attempt + 1));
+          if (canceled) {
+            return;
+          }
+        }
+
+        if (!healthy || canceled) {
+          return;
+        }
+
+        const tts = await voiceService.tts(STARTUP_GREETING_TEXT);
+        if (!tts?.success || !tts?.data?.audioBase64 || canceled) {
+          return;
+        }
+
+        window.sessionStorage.setItem(STARTUP_GREETING_SESSION_KEY, '1');
+
+        const mimeType = tts.data.mimeType || 'audio/wav';
+        const audio = new Audio(`data:${mimeType};base64,${tts.data.audioBase64}`);
+
+        audio.onended = () => {
+          if (!canceled) {
+            setStatus('idle');
+          }
+        };
+
+        audio.onerror = () => {
+          if (!canceled) {
+            setStatus('idle');
+          }
+        };
+
+        setStatus('speaking');
+        await audio.play();
+      } catch {
+        if (!canceled) {
+          setStatus('idle');
+        }
+      }
+    };
+
+    void greetOnStartup();
+
+    return () => {
+      canceled = true;
+    };
+  }, [setStatus]);
 
   return (
     <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

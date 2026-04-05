@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from models.schemas import ChatRequest, ChatResponse, IntentRequest, IntentResponse
@@ -19,7 +19,9 @@ from emotion_engine.elixi_personality import (
     VoiceToneMapper,
     ResponseLengthOptimizer,
 )
+from core.security import AuthUser, require_auth
 from memory_engine.memory_router import MemoryRouter
+from services.response_validation import validate_ai_response
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -66,7 +68,7 @@ async def classify_intent(body: IntentRequest) -> IntentResponse:
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest):
+async def chat(body: ChatRequest, user: AuthUser = Depends(require_auth)):
     # Check if this is a session start - if so, send greeting first
     intent = intent_classifier.classify(body.message)
     is_session_start = SessionManager.is_session_start(body.sessionId, intent.value, body.message)
@@ -81,6 +83,7 @@ async def chat(body: ChatRequest):
                         "intent": greeting_response["intent"],
                         "emotion_detected": greeting_response["emotion_detected"],
                         "response_text": greeting_response["response_text"],
+                        "message": greeting_response["response_text"],
                         "voice_tone": greeting_response["voice_tone"],
                         "action": greeting_response["action"],
                         "confidence": greeting_response["confidence"],
@@ -98,6 +101,7 @@ async def chat(body: ChatRequest):
             intent=greeting_response["intent"],
             emotion_detected=greeting_response["emotion_detected"],
             response_text=greeting_response["response_text"],
+            message=greeting_response["response_text"],
             voice_tone=greeting_response["voice_tone"],
             action=greeting_response["action"],
             confidence=greeting_response["confidence"],
@@ -115,7 +119,13 @@ async def chat(body: ChatRequest):
     openrouter_model = configured_online_model or DEFAULT_OPENROUTER_MODEL
     gemini_model = configured_online_model or DEFAULT_GEMINI_MODEL
 
-    context = await memory_router.get_context(body.sessionId, body.message, intent.value, entities)
+    context = await memory_router.get_context(
+        body.sessionId,
+        body.message,
+        owner_id=user.sub,
+        intent=intent.value,
+        entities=entities,
+    )
 
     if intent.value in {"action_cancel", "action_repeat"}:
         last_user_command = next(
@@ -196,11 +206,12 @@ async def chat(body: ChatRequest):
                     fallback_entities=entities,
                     emotion_detected=emotion_detected,
                 )
+                validated = validate_ai_response(parsed, fallback_intent=intent.value, fallback_emotion=emotion_detected)
                 
                 # Constrain response length
                 response_text = ResponseLengthOptimizer.constrain_length(
-                    parsed.get("response_text", parsed["content"]),
-                    intent.value
+                    validated.message,
+                    validated.intent,
                 )
                 
                 # Determine voice tone if not provided by LLM
@@ -214,8 +225,9 @@ async def chat(body: ChatRequest):
                 yield _to_sse(
                     {
                         "intent": parsed.get("intent", intent.value),
-                        "emotion_detected": emotion_detected,
+                        "emotion_detected": validated.emotion,
                         "response_text": response_text,
+                        "message": response_text,
                         "voice_tone": voice_tone,
                         "action": parsed.get("action", "respond"),
                         "confidence": float(parsed.get("confidence", intent_confidence)),
@@ -247,11 +259,12 @@ async def chat(body: ChatRequest):
             fallback_entities=entities,
             emotion_detected=emotion_detected,
         )
+        validated = validate_ai_response(parsed, fallback_intent=intent.value, fallback_emotion=emotion_detected)
         
         # Constrain response length
         response_text = ResponseLengthOptimizer.constrain_length(
-            parsed.get("response_text", parsed["content"]),
-            intent.value
+            validated.message,
+            validated.intent,
         )
         
         # Determine voice tone if not provided by LLM
@@ -263,9 +276,10 @@ async def chat(body: ChatRequest):
         memory_router.record_message(body.sessionId, "assistant", response_text)
         
         return ChatResponse(
-            intent=parsed.get("intent", intent.value),
-            emotion_detected=emotion_detected,
+            intent=validated.intent,
+            emotion_detected=validated.emotion,
             response_text=response_text,
+            message=response_text,
             voice_tone=voice_tone,
             action=parsed.get("action", "respond"),
             confidence=float(parsed.get("confidence", intent_confidence)),

@@ -25,7 +25,7 @@ const toStepLabel = (event: AutomationProgressEvent): string => {
 };
 
 export const WorkflowVisualizer: React.FC = () => {
-  const { runWorkflowWithProgress } = useSocket();
+  const { runWorkflowWithProgress } = useSocket({ enableRealtimeHandlers: false });
   const [steps, setSteps] = useState<VisualStep[]>(defaultSteps);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);

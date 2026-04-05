@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 import aiosqlite
 import json
+import uuid
 
 from memory_engine.long_term_memory import DB_PATH
 
@@ -156,7 +157,7 @@ class HabitSummarizer:
                     VALUES (?, ?, ?)
                     """,
                     (
-                        f"summary:{int(self._now_utc().timestamp())}",
+                        f"summary:{uuid.uuid4()}",
                         summary["summarized_at"],
                         json.dumps(summary),
                     ),

@@ -1,5 +1,6 @@
 """Voice engine API and streaming bridge endpoints."""
 
+import asyncio
 import base64
 import io
 import json
@@ -200,14 +201,16 @@ def _extract_audio_payload(payload: dict) -> bytes:
 async def voice_stream(websocket: WebSocket, sessionId: str = Query(...)):
     await websocket.accept()
     session_connections[sessionId].add(websocket)
+    last_status_sent: str | None = None
 
-    await websocket.send_json(
-        {
-            "type": "status",
-            "sessionId": sessionId,
-            "status": "wake-word" if wake_word_detector.running else "listening",
-        }
-    )
+    async def send_status_if_changed(next_status: str) -> None:
+        nonlocal last_status_sent
+        if last_status_sent == next_status:
+            return
+        last_status_sent = next_status
+        await websocket.send_json({"type": "status", "sessionId": sessionId, "status": next_status})
+
+    await send_status_if_changed("wake-word" if wake_word_detector.running else "listening")
 
     try:
         while True:
@@ -228,16 +231,16 @@ async def voice_stream(websocket: WebSocket, sessionId: str = Query(...)):
 
                 payload_type = payload.get("type")
                 if payload_type == "stop":
-                    await websocket.send_json({"type": "status", "sessionId": sessionId, "status": "idle"})
+                    await send_status_if_changed("idle")
                     break
 
                 if payload_type == "wake-word":
                     if bool(payload.get("active", True)):
                         wake_word_detector.start()
-                        await websocket.send_json({"type": "status", "sessionId": sessionId, "status": "wake-word"})
+                        await send_status_if_changed("wake-word")
                     else:
                         wake_word_detector.stop()
-                        await websocket.send_json({"type": "status", "sessionId": sessionId, "status": "listening"})
+                        await send_status_if_changed("listening")
                     continue
 
                 if payload_type == "transcript":
@@ -254,36 +257,24 @@ async def voice_stream(websocket: WebSocket, sessionId: str = Query(...)):
                     if not normalized_audio:
                         continue
 
-                    analysis = vad.analyze(normalized_audio)
+                    analysis = await asyncio.to_thread(vad.analyze, normalized_audio)
                     if not analysis["speech_detected"]:
-                        await websocket.send_json(
-                            {
-                                "type": "status",
-                                "sessionId": sessionId,
-                                "status": "wake-word" if wake_word_detector.running else "listening",
-                            }
-                        )
+                        await send_status_if_changed("wake-word" if wake_word_detector.running else "listening")
                         continue
 
-                    transcript = stt_engine.transcribe(normalized_audio)
+                    transcript = await asyncio.to_thread(stt_engine.transcribe, normalized_audio)
                     if transcript:
                         for event in _process_transcript(sessionId, transcript, True):
                             await websocket.send_json(event)
                     continue
 
             if bytes_data:
-                analysis = vad.analyze(bytes_data)
+                analysis = await asyncio.to_thread(vad.analyze, bytes_data)
                 if not analysis["speech_detected"]:
-                    await websocket.send_json(
-                        {
-                            "type": "status",
-                            "sessionId": sessionId,
-                            "status": "wake-word" if wake_word_detector.running else "listening",
-                        }
-                    )
+                    await send_status_if_changed("wake-word" if wake_word_detector.running else "listening")
                     continue
 
-                transcript = stt_engine.transcribe(bytes_data)
+                transcript = await asyncio.to_thread(stt_engine.transcribe, bytes_data)
                 if transcript:
                     for event in _process_transcript(sessionId, transcript, True):
                         await websocket.send_json(event)
@@ -300,14 +291,14 @@ async def voice_stream(websocket: WebSocket, sessionId: str = Query(...)):
 @app.post("/stt")
 async def speech_to_text(request: Request):
     audio_bytes = await request.body()
-    transcript = stt_engine.transcribe(audio_bytes)
+    transcript = await asyncio.to_thread(stt_engine.transcribe, audio_bytes)
     return {"transcript": transcript, "status": "ok" if transcript else "empty"}
 
 
 @app.post("/voice/tts")
 @app.post("/tts")
 async def text_to_speech(payload: TTSRequest):
-    audio = tts_engine.synthesize(payload.text)
+    audio = await asyncio.to_thread(tts_engine.synthesize, payload.text)
     if not audio:
         raise HTTPException(status_code=502, detail="Failed to synthesize audio")
 

@@ -2,7 +2,7 @@ import axios from 'axios';
 import WebSocket from 'ws';
 import { logger } from '../utils/logger';
 
-const VOICE_ENGINE_URL = process.env.VOICE_ENGINE_URL || 'http://localhost:8001';
+const VOICE_ENGINE_URL = process.env.VOICE_ENGINE_URL || 'http://127.0.0.1:8001';
 const VOICE_ENGINE_WS_URL = process.env.VOICE_ENGINE_WS_URL
   || VOICE_ENGINE_URL.replace(/^http/i, 'ws');
 
@@ -209,8 +209,17 @@ export const voiceService = {
 
   async synthesize(text: string) {
     const payload = { text };
-    const res = await axios.post(`${VOICE_ENGINE_URL}/voice/tts`, payload, { timeout: 15000 });
-    return res.data;
+    try {
+      const res = await axios.post(`${VOICE_ENGINE_URL}/voice/tts`, payload, { timeout: 30000 });
+      return res.data;
+    } catch (error) {
+      logger.warn('Voice TTS request failed on first attempt; retrying once', {
+        voiceEngineUrl: VOICE_ENGINE_URL,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const retryRes = await axios.post(`${VOICE_ENGINE_URL}/voice/tts`, payload, { timeout: 60000 });
+      return retryRes.data;
+    }
   },
 
   async getVoiceSettings() {
@@ -229,7 +238,32 @@ export const voiceService = {
   },
 
   async getCapabilities() {
-    const res = await axios.get(`${VOICE_ENGINE_URL}/voice/capabilities`, { timeout: 5000 });
-    return res.data;
+    try {
+      const res = await axios.get(`${VOICE_ENGINE_URL}/voice/capabilities`, { timeout: 5000 });
+      return res.data;
+    } catch (error) {
+      logger.warn('Voice capabilities unavailable; returning degraded capability set', {
+        voiceEngineUrl: VOICE_ENGINE_URL,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        status: 'degraded',
+        available: false,
+        stt: {
+          whisper: false,
+          whisperModel: null,
+          vosk: false,
+          windowsFallback: true,
+        },
+        tts: {
+          pyttsx3: false,
+          windowsFallback: true,
+        },
+        vad: {
+          webrtcvad: false,
+          rmsFallback: true,
+        },
+      };
+    }
   },
 };

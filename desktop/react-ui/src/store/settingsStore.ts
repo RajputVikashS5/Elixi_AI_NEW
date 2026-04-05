@@ -39,7 +39,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   ollamaModel: 'llama3',
   onlineModel: 'meta-llama/llama-3-8b-instruct',
   ollamaUrl: 'http://localhost:11434',
-  backendUrl: 'http://localhost:3001',
+  backendUrl: 'http://127.0.0.1:3001',
   voiceEnabled: false,
   wakeWordEnabled: false,
   ttsSpeed: 175,

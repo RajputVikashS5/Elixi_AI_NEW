@@ -64,7 +64,11 @@ class ResponseParser:
 
         parsed_json = self._extract_json_object(clean_text)
         if parsed_json:
-            response = str(parsed_json.get("response", "")).strip() or clean_text
+            response = (
+                str(parsed_json.get("response_text") or "").strip()
+                or str(parsed_json.get("response") or "").strip()
+                or clean_text
+            )
             return {
                 "content": response,
                 "response": response,
@@ -74,7 +78,7 @@ class ResponseParser:
                 "entities": parsed_json.get("entities") if isinstance(parsed_json.get("entities"), dict) else (fallback_entities or {}),
                 "confidence": float(parsed_json.get("confidence", 0.75)),
                 "voice_tone": parsed_json.get("voice_tone"),
-                "emotion_detected": emotion_detected,
+                "emotion_detected": parsed_json.get("emotion_detected") or emotion_detected,
                 "actions": actions,
             }
 

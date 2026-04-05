@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { Trash2, RefreshCw } from 'lucide-react';
+import { Trash2, RefreshCw, AlertTriangle, WifiOff, LoaderCircle } from 'lucide-react';
 import { useChatStore } from '../store/chatStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useEmotionStore } from '../store/emotionStore';
@@ -19,7 +19,7 @@ const ChatPage: React.FC = () => {
   const { personalityMode, llmProvider, ollamaModel, onlineModel } = useSettingsStore();
   const { emotion, history: emotionHistory } = useEmotionStore();
   const { status: voiceStatus, transcript } = useVoiceStore();
-  const { sendMessage } = useSocket();
+  const { sendMessage, isConnected, connectionState, connectionError } = useSocket();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom
@@ -61,6 +61,17 @@ const ChatPage: React.FC = () => {
   ]);
 
   const showWelcome = messages.length === 0;
+  const backendUnavailable = !isConnected;
+  const backendStatusTitle =
+    connectionState === 'connecting'
+      ? 'Connecting to backend'
+      : connectionState === 'reconnecting'
+        ? 'Reconnecting to backend'
+        : connectionState === 'failed'
+          ? 'Backend connection failed'
+          : 'Backend disconnected';
+  const backendStatusMessage =
+    connectionError || 'ELIXI cannot reach the backend on http://127.0.0.1:3001. Restart the backend to send chat requests.';
 
   return (
     <div className="flex flex-col h-full bg-elixi-bg">
@@ -89,6 +100,27 @@ const ChatPage: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {backendUnavailable && (
+        <div className="mx-4 mt-3 flex items-start gap-3 rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-rose-400/15 text-rose-200">
+            {connectionState === 'connecting' || connectionState === 'reconnecting' ? (
+              <LoaderCircle size={16} className="animate-spin" />
+            ) : (
+              <WifiOff size={16} />
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 font-medium">
+              <AlertTriangle size={14} className="text-rose-200" />
+              {backendStatusTitle}
+            </div>
+            <p className="mt-1 text-xs text-rose-100/85">
+              {backendStatusMessage}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -121,8 +153,8 @@ const ChatPage: React.FC = () => {
       {/* Input area */}
       <ChatInput
         onSend={handleSend}
-        disabled={isLoading || isStreaming}
-        placeholder={`Message ELIXI (${personalityMode} mode)...`}
+        disabled={isLoading || isStreaming || backendUnavailable}
+        placeholder={backendUnavailable ? `Backend ${connectionState}. Restart the backend to chat.` : `Message ELIXI (${personalityMode} mode)...`}
       />
     </div>
   );

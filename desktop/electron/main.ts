@@ -44,7 +44,7 @@ function createMainWindow(): BrowserWindow {
     show: false,
   });
 
-  const trustedOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173', 'file://']);
+  const trustedOrigins = new Set(['http://127.0.0.1:5173', 'file://']);
   const mediaPermissions = new Set(['media', 'camera', 'microphone']);
 
   const isTrustedUrl = (url: string): boolean => {
@@ -77,16 +77,16 @@ function createMainWindow(): BrowserWindow {
   // Content Security Policy
   win.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     const csp = isDev
-      ? "default-src 'self' http://localhost:5173; " +
-        "script-src 'self' 'unsafe-inline' http://localhost:5173; " +
-        "style-src 'self' 'unsafe-inline' http://localhost:5173; " +
-        "connect-src 'self' ws://localhost:5173 http://localhost:5173 ws://localhost:3001 http://localhost:3001 http://localhost:8000 http://localhost:8001; " +
-        "img-src 'self' data: blob: http://localhost:5173; " +
-        "font-src 'self' data: http://localhost:5173"
+      ? "default-src 'self' http://127.0.0.1:5173; " +
+        "script-src 'self' 'unsafe-inline' http://127.0.0.1:5173; " +
+        "style-src 'self' 'unsafe-inline' http://127.0.0.1:5173; " +
+        "connect-src 'self' ws://127.0.0.1:5173 http://127.0.0.1:5173 ws://127.0.0.1:3001 http://127.0.0.1:3001 http://127.0.0.1:8000 http://127.0.0.1:8001; " +
+        "img-src 'self' data: blob: http://127.0.0.1:5173; " +
+        "font-src 'self' data: http://127.0.0.1:5173"
       : "default-src 'self'; " +
         "script-src 'self'; " +
         "style-src 'self' 'unsafe-inline'; " +
-        "connect-src 'self' ws://localhost:3001 http://localhost:3001 http://localhost:8000 http://localhost:8001; " +
+        "connect-src 'self' ws://127.0.0.1:3001 http://127.0.0.1:3001 http://127.0.0.1:8000 http://127.0.0.1:8001; " +
         "img-src 'self' data:; " +
         "font-src 'self' data:";
 
@@ -100,7 +100,7 @@ function createMainWindow(): BrowserWindow {
 
   // Load UI
   if (isDev) {
-    win.loadURL('http://localhost:5173');
+    win.loadURL('http://127.0.0.1:5173');
     if (shouldOpenDevTools) {
       win.webContents.openDevTools({ mode: 'detach' });
     }
@@ -196,7 +196,7 @@ app.on('before-quit', () => {
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', (event, url) => {
     const parsedUrl = new URL(url);
-    const allowedOrigins = ['http://localhost:5173', 'http://localhost:3001'];
+    const allowedOrigins = ['http://127.0.0.1:5173', 'http://127.0.0.1:3001'];
     if (!allowedOrigins.includes(parsedUrl.origin)) {
       event.preventDefault();
     }

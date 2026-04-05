@@ -1,5 +1,7 @@
 """Emotion detection endpoints."""
 
+import asyncio
+
 from fastapi import APIRouter
 
 from models.schemas import EmotionRequest, EmotionResponse
@@ -22,11 +24,11 @@ camera_manager = get_camera_manager(enabled=False)  # Disabled by default (priva
 
 @router.post("/emotion", response_model=EmotionResponse)
 async def detect_emotion(body: EmotionRequest) -> EmotionResponse:
-    signals = [
-        typing_analyzer.analyze(body.typing_wpm, body.errors, body.typing_pause_ms),
-        voice_analyzer.analyze(body.voice_pitch, body.voice_energy, body.voice_speech_rate, body.voice_jitter),
-        time_analyzer.analyze(body.time_of_day),
-    ]
+    signals = await asyncio.gather(
+        asyncio.to_thread(typing_analyzer.analyze, body.typing_wpm, body.errors, body.typing_pause_ms),
+        asyncio.to_thread(voice_analyzer.analyze, body.voice_pitch, body.voice_energy, body.voice_speech_rate, body.voice_jitter),
+        asyncio.to_thread(time_analyzer.analyze, body.time_of_day),
+    )
     
     # Include camera data if available (from request body OR from live camera)
     if camera_manager.is_enabled():
@@ -36,10 +38,10 @@ async def detect_emotion(body: EmotionRequest) -> EmotionResponse:
     else:
         # Use provided webcam metrics from request (if any)
         signals.append(
-            webcam_analyzer.analyze(body.webcam_face_engagement, body.webcam_eye_strain)
+            await asyncio.to_thread(webcam_analyzer.analyze, body.webcam_face_engagement, body.webcam_eye_strain)
         )
     
-    final = aggregator.aggregate(signals)
+    final = await asyncio.to_thread(aggregator.aggregate, signals)
     return EmotionResponse(state=final["state"], confidence=final["confidence"], signals=final["signals"])
 
 

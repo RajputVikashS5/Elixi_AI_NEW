@@ -70,14 +70,16 @@ export function useVoice() {
     startVoiceSession: emitVoiceStart,
     stopVoiceSession: emitVoiceStop,
     sendVoiceAudio,
-  } = useSocket();
+  } = useSocket({ enableRealtimeHandlers: false });
 
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const mutedGainRef = useRef<GainNode | null>(null);
   const lastFrameSentAtRef = useRef<number | null>(null);
   const lastVolumeUpdateRef = useRef<number>(0);
+  const lastAudioSendAtRef = useRef<number>(0);
 
   const teardownAudioCapture = useCallback(() => {
     if (processorRef.current) {
@@ -89,6 +91,11 @@ export function useVoice() {
     if (sourceRef.current) {
       sourceRef.current.disconnect();
       sourceRef.current = null;
+    }
+
+    if (mutedGainRef.current) {
+      mutedGainRef.current.disconnect();
+      mutedGainRef.current = null;
     }
 
     if (streamRef.current) {
@@ -105,6 +112,7 @@ export function useVoice() {
     // Clean up refs - don't call voice.setVolume here to avoid re-render loops
     lastFrameSentAtRef.current = null;
     lastVolumeUpdateRef.current = 0;
+    lastAudioSendAtRef.current = 0;
   }, []); // No dependencies
 
   useEffect(() => {
@@ -148,8 +156,13 @@ export function useVoice() {
       }
 
       const audioContext = new AudioContextImpl();
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
       const source = audioContext.createMediaStreamSource(stream);
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const mutedGain = audioContext.createGain();
+      mutedGain.gain.value = 0;
 
       processor.onaudioprocess = (event) => {
         const inputChannel = event.inputBuffer.getChannelData(0);
@@ -170,7 +183,8 @@ export function useVoice() {
         const bytes = new Uint8Array(pcm16.buffer);
         const cadenceMs = lastFrameSentAtRef.current ? now - lastFrameSentAtRef.current : 0;
 
-        if (bytes.byteLength > 0) {
+        // Keep frame cadence bounded so backend STT queue doesn't get flooded.
+        if (bytes.byteLength > 0 && now - lastAudioSendAtRef.current >= 120) {
           voice.setDebugMetrics({
             sampleRate: TARGET_SAMPLE_RATE,
             frameBytes: bytes.byteLength,
@@ -178,16 +192,19 @@ export function useVoice() {
           });
           sendVoiceAudio(uint8ToBase64(bytes), 'pcm_s16le', TARGET_SAMPLE_RATE);
           lastFrameSentAtRef.current = now;
+          lastAudioSendAtRef.current = now;
         }
       };
 
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      processor.connect(mutedGain);
+      mutedGain.connect(audioContext.destination);
 
       streamRef.current = stream;
       audioContextRef.current = audioContext;
       sourceRef.current = source;
       processorRef.current = processor;
+      mutedGainRef.current = mutedGain;
       voice.setDebugMetrics({
         sampleRate: TARGET_SAMPLE_RATE,
         frameBytes: 0,

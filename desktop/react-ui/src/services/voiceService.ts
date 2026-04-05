@@ -49,7 +49,11 @@ export const voiceService = {
   },
 
   tts: async (text: string) => {
-    const res = await api.post<{ success: boolean; data: TtsAudioPayload }>('/api/voice/tts', { text });
+    const res = await api.post<{ success: boolean; data: TtsAudioPayload }>(
+      '/api/voice/tts',
+      { text },
+      { timeout: 90000 },
+    );
     return res.data;
   },
 

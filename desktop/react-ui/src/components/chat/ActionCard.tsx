@@ -9,14 +9,16 @@ interface ActionCardProps {
 
 export const ActionCard: React.FC<ActionCardProps> = ({ action }) => {
   const [status, setStatus] = useState<ActionResult['status']>(action.status || 'pending');
+  const actionType = typeof action?.type === 'string' && action.type.trim().length > 0 ? action.type : 'action';
+  const actionTarget = typeof action?.target === 'string' ? action.target : undefined;
 
   const run = async () => {
     setStatus('pending');
     try {
-      if (action.type.includes('workflow') && action.target) {
-        await automationService.runWorkflow(action.target);
+      if (actionType.includes('workflow') && actionTarget) {
+        await automationService.runWorkflow(actionTarget);
       } else {
-        await automationService.executeCommand(action.type, action.target ? [action.target] : undefined);
+        await automationService.executeCommand(actionType, actionTarget ? [actionTarget] : undefined);
       }
       setStatus('executed');
     } catch {
@@ -28,8 +30,8 @@ export const ActionCard: React.FC<ActionCardProps> = ({ action }) => {
     <div className="mt-2 rounded-xl border border-slate-500/30 bg-slate-900/50 p-2.5">
       <div className="mb-2 flex items-center gap-2 text-xs text-slate-200">
         <TerminalSquare size={13} className="text-sky-300" />
-        <span className="capitalize">{action.type.replace(/_/g, ' ')}</span>
-        {action.target ? <span className="text-slate-400">· {action.target}</span> : null}
+        <span className="capitalize">{actionType.replace(/_/g, ' ')}</span>
+        {actionTarget ? <span className="text-slate-400">· {actionTarget}</span> : null}
       </div>
       <div className="flex items-center justify-between">
         <button

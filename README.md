@@ -61,17 +61,12 @@ Then select **OpenRouter (cloud)** or **Google Gemini (cloud)** in the app setti
 
 ### 5. Start in the browser
 
-**Terminal 1 – Browser stack (AI engine + backend + UI):**
+**Terminal 1 – Browser stack (AI engine + voice engine + backend + UI):**
 ```bash
 npm run dev
 ```
 
 Then open `http://127.0.0.1:5173` in your browser.
-
-**Optional: Voice Engine**
-```bash
-npm run start:voice
-```
 
 **Optional: Electron desktop app**
 ```bash

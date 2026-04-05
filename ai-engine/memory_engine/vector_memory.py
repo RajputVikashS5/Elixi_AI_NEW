@@ -103,20 +103,32 @@ class VectorMemory:
             except Exception as exc:
                 logger.debug("VectorMemory Chroma delete failed for %s: %s", doc_id, exc)
 
-    def _fetch_documents(self, session_id: Optional[str] = None) -> list[dict]:
+    def _fetch_documents(self, session_id: Optional[str] = None, owner_id: Optional[str] = None) -> list[dict]:
         documents: list[dict] = []
 
         with sqlite3.connect(DB_PATH) as db:
             db.row_factory = sqlite3.Row
 
-            fact_rows = db.execute(
-                """
-                SELECT id, category, key, value, confidence, source
-                FROM memories
-                ORDER BY updated_at DESC
-                LIMIT 300
-                """
-            ).fetchall()
+            if owner_id:
+                fact_rows = db.execute(
+                    """
+                    SELECT id, category, key, value, confidence, source
+                    FROM memories
+                    WHERE owner_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 300
+                    """,
+                    (owner_id,),
+                ).fetchall()
+            else:
+                fact_rows = db.execute(
+                    """
+                    SELECT id, category, key, value, confidence, source
+                    FROM memories
+                    ORDER BY updated_at DESC
+                    LIMIT 300
+                    """
+                ).fetchall()
             for row in fact_rows:
                 content = f"{row['category']} {row['key']} {row['value']}"
                 documents.append(
@@ -136,16 +148,28 @@ class VectorMemory:
                 )
 
             if session_id:
-                message_rows = db.execute(
-                    """
-                    SELECT id, role, content, intent, COALESCE(timestamp, created_at) AS created_at
-                    FROM messages
-                    WHERE session_id = ?
-                    ORDER BY COALESCE(timestamp, created_at) DESC
-                    LIMIT 120
-                    """,
-                    (session_id,),
-                ).fetchall()
+                if owner_id:
+                    message_rows = db.execute(
+                        """
+                        SELECT id, role, content, intent, COALESCE(timestamp, created_at) AS created_at
+                        FROM messages
+                        WHERE session_id = ? AND owner_id = ?
+                        ORDER BY COALESCE(timestamp, created_at) DESC
+                        LIMIT 120
+                        """,
+                        (session_id, owner_id),
+                    ).fetchall()
+                else:
+                    message_rows = db.execute(
+                        """
+                        SELECT id, role, content, intent, COALESCE(timestamp, created_at) AS created_at
+                        FROM messages
+                        WHERE session_id = ?
+                        ORDER BY COALESCE(timestamp, created_at) DESC
+                        LIMIT 120
+                        """,
+                        (session_id,),
+                    ).fetchall()
                 for row in message_rows:
                     documents.append(
                         {
@@ -193,9 +217,15 @@ class VectorMemory:
                     }
                 )
 
-            vector_rows = db.execute(
-                "SELECT id, text, metadata FROM vector_documents ORDER BY updated_at DESC LIMIT 300"
-            ).fetchall()
+            if owner_id:
+                vector_rows = db.execute(
+                    "SELECT id, text, metadata FROM vector_documents WHERE metadata LIKE ? ORDER BY updated_at DESC LIMIT 300",
+                    (f'%"owner_id": "{owner_id}"%',),
+                ).fetchall()
+            else:
+                vector_rows = db.execute(
+                    "SELECT id, text, metadata FROM vector_documents ORDER BY updated_at DESC LIMIT 300"
+                ).fetchall()
             for row in vector_rows:
                 metadata = {}
                 if row["metadata"]:
@@ -268,12 +298,18 @@ class VectorMemory:
         ranked.sort(key=lambda item: item["score"], reverse=True)
         return ranked[:top_k]
 
-    def search(self, query: str, top_k: int = 5, session_id: Optional[str] = None) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        session_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+    ) -> list[dict]:
         query = query.strip()
         if not query:
             return []
 
-        documents = self._fetch_documents(session_id=session_id)
+        documents = self._fetch_documents(session_id=session_id, owner_id=owner_id)
         if not documents:
             logger.debug("VectorMemory.search found no documents for query: %s", query)
             return []

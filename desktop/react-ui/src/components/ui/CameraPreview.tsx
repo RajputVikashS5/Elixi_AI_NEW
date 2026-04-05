@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, CameraOff, X } from 'lucide-react';
+import { api } from '../../services/api';
 
 export const CameraPreview: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -22,21 +23,21 @@ export const CameraPreview: React.FC = () => {
     let mounted = true;
     let frameTimeout: number | null = null;
 
+    /**
+     * Release camera from backend AI engine.
+     * Uses the unified API service.
+     */
     const releaseBackendCamera = async (): Promise<boolean> => {
-      const targets = ['http://127.0.0.1:8000/ai/camera/disable', 'http://localhost:8000/ai/camera/disable'];
-
-      for (const target of targets) {
-        try {
-          const response = await fetch(target, { method: 'POST' });
-          if (response.ok) {
-            return true;
-          }
-        } catch {
-          // Try next target.
-        }
+      try {
+        console.log('[CameraPreview] Releasing backend camera...');
+        const response = await api.post('/ai/camera/disable');
+        console.log('[CameraPreview] Backend camera released:', response.data);
+        return true;
+      } catch (error) {
+        console.warn('[CameraPreview] Failed to release backend camera:', error);
+        // Continue anyway; camera might not be in use
+        return false;
       }
-
-      return false;
     };
 
     const startPreview = async () => {

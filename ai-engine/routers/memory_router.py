@@ -1,15 +1,19 @@
 """Memory API router."""
 
+import asyncio
 import json
 import logging
 import uuid
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from core.config import load_settings
+from core.security import AuthUser, require_auth
 from models.schemas import MemoryFact, MemorySearchRequest
 from memory_engine.long_term_memory import LongTermMemory
 from memory_engine.vector_memory import VectorMemory
 from memory_engine.habit_summarizer import HabitSummarizer
 from memory_engine.habit_tracker import HabitTracker
+from services.memory_retention_service import MemoryRetentionService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -17,15 +21,20 @@ memory = LongTermMemory()
 vector_memory = VectorMemory()
 habit_summarizer = HabitSummarizer()
 habit_tracker = HabitTracker(memory)
+retention = MemoryRetentionService(settings=load_settings(), memory=memory)
 
 
 @router.get("/facts")
-async def get_facts(category: str | None = Query(default=None)):
-    return await memory.get_facts(category)
+async def get_facts(
+    category: str | None = Query(default=None),
+    user: AuthUser = Depends(require_auth),
+):
+    await retention.enforce_for_user(user.sub)
+    return await memory.get_facts(category, owner_id=user.sub)
 
 
 @router.post("/facts")
-async def store_fact(fact: MemoryFact):
+async def store_fact(fact: MemoryFact, user: AuthUser = Depends(require_auth)):
     fact_id = str(uuid.uuid4())
     await memory.store_fact(
         fact_id=fact_id,
@@ -34,14 +43,18 @@ async def store_fact(fact: MemoryFact):
         value=fact.value,
         confidence=fact.confidence,
         source=fact.source,
+        owner_id=user.sub,
     )
+    await retention.enforce_for_user(user.sub)
 
     # Keep vector index fresh for semantic recall.
-    vector_memory.store(
-        doc_id=f"memory:{fact_id}",
-        text=f"{fact.category} {fact.key}: {fact.value}",
-        metadata={
+    await asyncio.to_thread(
+        vector_memory.store,
+        f"memory:{fact_id}",
+        f"{fact.category} {fact.key}: {fact.value}",
+        {
             "source": "memory",
+            "owner_id": user.sub,
             "category": fact.category,
             "key": fact.key,
             "confidence": fact.confidence,
@@ -51,18 +64,19 @@ async def store_fact(fact: MemoryFact):
 
 
 @router.delete("/facts/{fact_id}")
-async def delete_fact(fact_id: str):
-    deleted = await memory.delete_fact(fact_id)
+async def delete_fact(fact_id: str, user: AuthUser = Depends(require_auth)):
+    deleted = await memory.delete_fact(fact_id, owner_id=user.sub)
     if not deleted:
         raise HTTPException(status_code=404, detail="Fact not found")
-    vector_memory.delete(f"memory:{fact_id}")
+    await asyncio.to_thread(vector_memory.delete, f"memory:{fact_id}")
     return {"status": "deleted"}
 
 
 @router.post("/search")
-async def search_memory(body: MemorySearchRequest):
-    fact_results = await memory.search_facts(body.query)
-    semantic_results = vector_memory.search(body.query, top_k=body.limit)
+async def search_memory(body: MemorySearchRequest, user: AuthUser = Depends(require_auth)):
+    await retention.enforce_for_user(user.sub)
+    fact_results = await memory.search_facts(body.query, owner_id=user.sub)
+    semantic_results = await asyncio.to_thread(vector_memory.search, body.query, body.limit, None, user.sub)
 
     results: list[dict] = []
     seen_ids: set[str] = set()
@@ -91,7 +105,8 @@ async def search_memory(body: MemorySearchRequest):
 
 
 @router.get("/habits")
-async def get_habits():
+async def get_habits(user: AuthUser = Depends(require_auth)):
+    await retention.enforce_for_user(user.sub)
     return await memory.get_habits()
 
 
@@ -102,11 +117,13 @@ async def semantic_browse(
     source_type: str | None = Query(default=None, description="Filter by source: memory, message, habit, or vector"),
     limit: int = Query(default=10, ge=1, le=100, description="Maximum results"),
     session_id: str | None = Query(default=None, description="Optional session ID for context"),
+    user: AuthUser = Depends(require_auth),
 ):
     """Semantic browse with filters and confidence thresholds."""
     try:
         # Fetch semantic results from vector memory
-        results = vector_memory.search(query=query, top_k=limit * 2, session_id=session_id)
+        await retention.enforce_for_user(user.sub)
+        results = await asyncio.to_thread(vector_memory.search, query, limit * 2, session_id, user.sub)
         
         # Filter by confidence threshold and source type
         filtered_results: list[dict] = []

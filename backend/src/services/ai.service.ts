@@ -2,6 +2,7 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../utils/logger';
+import { getAiEngineAuthHeaders } from './aiAuth.service';
 
 function loadFallbackEnvFromAiEngine(): void {
   const envCandidates = [
@@ -51,7 +52,7 @@ function loadFallbackEnvFromAiEngine(): void {
 
 loadFallbackEnvFromAiEngine();
 
-const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://localhost:8000';
+const AI_ENGINE_URL = process.env.AI_ENGINE_URL || 'http://127.0.0.1:8000';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OLLAMA_API_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
@@ -519,8 +520,10 @@ export const aiService = {
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
     try {
+      const headers = await getAiEngineAuthHeaders();
       const res = await axios.post<ChatResponse>(`${AI_ENGINE_URL}/ai/chat`, request, {
         timeout: 60_000,
+        headers,
       });
 
       lastProviderDiagnostics = {
@@ -555,8 +558,10 @@ export const aiService = {
 
   async classifyIntent(message: string): Promise<string> {
     try {
+      const headers = await getAiEngineAuthHeaders();
       const res = await axios.post<{ intent: string }>(`${AI_ENGINE_URL}/ai/intent`, { message }, {
         timeout: 10_000,
+        headers,
       });
       return res.data.intent;
     } catch {
@@ -566,10 +571,11 @@ export const aiService = {
 
   async detectEmotion(signals: object): Promise<{ state: string; confidence: number }> {
     try {
+      const headers = await getAiEngineAuthHeaders();
       const res = await axios.post<{ state: string; confidence: number }>(
         `${AI_ENGINE_URL}/ai/emotion`,
         signals,
-        { timeout: 5_000 }
+        { timeout: 5_000, headers }
       );
       return res.data;
     } catch {
@@ -596,6 +602,7 @@ export const aiService = {
     }
   ): Promise<SemanticBrowseResponse> {
     try {
+      const headers = await getAiEngineAuthHeaders();
       const params = new URLSearchParams({
         query,
         confidence_threshold: String(options?.confidenceThreshold ?? 0),
@@ -610,7 +617,7 @@ export const aiService = {
 
       const res = await axios.get<SemanticBrowseResponse>(
         `${AI_ENGINE_URL}/memory/semantic-browse?${params.toString()}`,
-        { timeout: 15_000 }
+        { timeout: 15_000, headers }
       );
       return res.data;
     } catch (err) {
@@ -622,9 +629,10 @@ export const aiService = {
 
   async getHabitSummary(): Promise<HabitSummary> {
     try {
+      const headers = await getAiEngineAuthHeaders();
       const res = await axios.get<HabitSummary>(
         `${AI_ENGINE_URL}/memory/habit-summary`,
-        { timeout: 10_000 }
+        { timeout: 10_000, headers }
       );
       return res.data;
     } catch (err) {
@@ -635,10 +643,11 @@ export const aiService = {
 
   async triggerHabitSummarization(): Promise<unknown> {
     try {
+      const headers = await getAiEngineAuthHeaders();
       const res = await axios.post<unknown>(
         `${AI_ENGINE_URL}/memory/habit-summary/trigger`,
         {},
-        { timeout: 30_000 }
+        { timeout: 30_000, headers }
       );
       return res.data;
     } catch (err) {
@@ -655,6 +664,7 @@ export const aiService = {
     entities?: Record<string, unknown>;
   }): Promise<HabitSuggestionDiagnosticsResponse> {
     try {
+      const headers = await getAiEngineAuthHeaders();
       const params = new URLSearchParams({
         message: options.message,
         intent: options.intent ?? '',
@@ -667,7 +677,7 @@ export const aiService = {
 
       const res = await axios.get<HabitSuggestionDiagnosticsResponse>(
         `${AI_ENGINE_URL}/memory/habit-suggestions/diagnostics?${params.toString()}`,
-        { timeout: 15_000 }
+        { timeout: 15_000, headers }
       );
       return res.data;
     } catch (err) {

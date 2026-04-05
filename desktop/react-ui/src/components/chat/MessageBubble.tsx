@@ -65,11 +65,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
             <span className="inline-block w-0.5 h-4 bg-elixi-accent ml-0.5 animate-pulse" />
           )}
 
-          {message.actions?.length ? (
+          {Array.isArray(message.actions) && message.actions.length ? (
             <div className="mt-2 space-y-2">
-              {message.actions.map((action, index) => (
-                <ActionCard key={`${message.id}-action-${index}`} action={action} />
-              ))}
+              {message.actions
+                .filter((action) => action && typeof action === 'object')
+                .map((action, index) => (
+                  <ActionCard key={`${message.id}-action-${index}`} action={action} />
+                ))}
             </div>
           ) : null}
         </div>
