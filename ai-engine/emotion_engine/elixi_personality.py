@@ -67,15 +67,15 @@ class SessionManager:
         Returns:
             True if this is likely a session start
         """
-        # First message in a session or explicit greeting
-        is_new_session = session_id not in SessionManager._SESSION_STARTS
+        # Only explicit greetings should trigger the canned greeting.
+        # A fresh session should still route the user's first real question to the LLM.
         is_greeting = intent in SessionManager._GREETING_INTENTS
         is_greeting_message = any(
             keyword in message.lower() 
             for keyword in ["hello", "hi", "hey", "good morning", "good evening", "greetings", "wake up", "elixi"]
         )
         
-        return is_new_session or (is_greeting and is_greeting_message)
+        return is_greeting and is_greeting_message
     
     @staticmethod
     def mark_session_started(session_id: str):

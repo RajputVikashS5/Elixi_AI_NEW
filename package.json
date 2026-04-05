@@ -8,14 +8,17 @@
     "backend"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:ai\" \"npm run dev:voice\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "predev": "node scripts/cleanup-dev-ports.cjs",
+    "dev": "npm run dev:web",
     "dev:all": "npm run dev",
-    "dev:core": "concurrently \"npm run dev:ai\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:core": "concurrently \"npm run dev:ai\" \"npm run dev:backend\" \"npm run dev:ui\"",
+    "dev:web": "concurrently \"npm run dev:ai\" \"npm run dev:backend\" \"npm run dev:ui\"",
     "dev:all-with-voice": "concurrently \"npm run dev:ai\" \"npm run dev:voice\" \"npm run dev:backend\" \"npm run dev:ui\" \"npm run dev:electron\"",
     "dev:ai": "npm run start:ai",
     "dev:voice": "npm run start:voice",
     "dev:backend": "npm run dev --workspace=backend",
     "dev:ui": "npm run dev:ui --workspace=desktop",
+    "dev:desktop": "concurrently \"npm run dev:ui\" \"npm run dev:electron\"",
     "dev:electron": "wait-on http://127.0.0.1:5173 && electron desktop/electron/main.js",
     "build": "npm run build --workspace=desktop && npm run build --workspace=backend",
     "check:startup": "node scripts/startup-health-check.mjs",
@@ -26,10 +29,11 @@
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "wait-on": "^7.2.0",
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3",
-    "typescript": "^5.4.5"
+    "kill-port": "^2.0.1",
+    "typescript": "^5.4.5",
+    "wait-on": "^7.2.0"
   },
   "build": {
     "appId": "com.elixi.app",

@@ -237,11 +237,19 @@ export const CameraPreview: React.FC = () => {
           </button>
         </div>
 
-        <div className="aspect-video bg-black/60">
-          {enabled && status === 'ready' ? (
-            <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover scale-x-[-1]" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-xs text-elixi-muted px-2 text-center">
+        <div className="relative aspect-video bg-black/60">
+          {enabled && (
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className={`w-full h-full object-cover scale-x-[-1] ${status === 'ready' ? 'opacity-100' : 'opacity-0'}`}
+            />
+          )}
+
+          {(!enabled || status !== 'ready') && (
+            <div className="absolute inset-0 w-full h-full flex items-center justify-center text-xs text-elixi-muted px-2 text-center">
               {status === 'blocked'
                 ? 'Allow camera access in browser/electron settings.'
                 : status === 'error'

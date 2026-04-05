@@ -59,21 +59,23 @@ ELIXI_CAMERA_ENABLED=false
 
 Then select **OpenRouter (cloud)** or **Google Gemini (cloud)** in the app settings page under **AI Model → LLM Provider**.
 
-### 5. Start all services
+### 5. Start in the browser
 
-**Terminal 1 – AI Engine:**
+**Terminal 1 – Browser stack (AI engine + backend + UI):**
 ```bash
-npm run start:ai
+npm run dev
 ```
 
-**Terminal 2 – Voice Engine (optional):**
+Then open `http://127.0.0.1:5173` in your browser.
+
+**Optional: Voice Engine**
 ```bash
 npm run start:voice
 ```
 
-**Terminal 3 – Desktop App (backend + UI + Electron):**
+**Optional: Electron desktop app**
 ```bash
-npm run dev
+npm run dev:desktop
 ```
 
 ---

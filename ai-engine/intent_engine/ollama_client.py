@@ -3,17 +3,20 @@
 import httpx
 import json
 import logging
+import os
 from typing import AsyncGenerator, Optional
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_TIMEOUT = 120.0
 
 
 class OllamaClient:
-    def __init__(self, base_url: str = OLLAMA_BASE_URL):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: Optional[str] = None):
+        # Allow explicit override, then environment, then sane local default.
+        resolved_base_url = (base_url or os.getenv("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL).strip()
+        self.base_url = resolved_base_url.rstrip("/")
 
     async def is_available(self) -> bool:
         try:
