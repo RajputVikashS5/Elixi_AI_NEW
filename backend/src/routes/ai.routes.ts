@@ -12,6 +12,7 @@ aiRoutes.get('/providers/active', getActiveProviderDebug);
 
 /**
  * Retry helper for AI engine requests with exponential backoff
+ * During startup, connection errors get more retries; for other errors, we fail fast
  */
 async function retryWithBackoff(
   fn: () => Promise<any>,
@@ -26,7 +27,10 @@ async function retryWithBackoff(
       lastError = error;
       if (attempt < maxAttempts - 1) {
         const delayMs = baseDelayMs * Math.pow(2, attempt);
-        logger.debug(`[AI Proxy] Retry ${attempt + 1}/${maxAttempts} after ${delayMs}ms`);
+        // Only log retries on connection errors (likely startup)
+        if (isRetryableConnectionError(error)) {
+          logger.debug(`[AI Proxy] Connection retry ${attempt + 1}/${maxAttempts} after ${delayMs}ms`);
+        }
         await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
@@ -78,7 +82,7 @@ aiRoutes.all('*', async (req: Request, res: Response) => {
 
     // Camera disable is idempotent; if AI is not up yet, treat as effectively disabled.
     if (isCameraDisable && isRetryableConnectionError(error)) {
-      logger.warn('[AI Proxy] AI unavailable during camera disable; returning graceful success');
+      logger.debug('[AI Proxy] AI unavailable during camera disable; returning graceful success');
       res.status(200).json({
         enabled: false,
         status: {
@@ -89,7 +93,13 @@ aiRoutes.all('*', async (req: Request, res: Response) => {
       return;
     }
 
-    logger.warn(`[AI Proxy] Failed to proxy request: ${error.message}`);
+    // Only warn on connection errors during startup; debug for other errors
+    if (isRetryableConnectionError(error)) {
+      logger.debug(`[AI Proxy] Connection failed to ${fullPath}: ${error.code}`);
+    } else {
+      logger.warn(`[AI Proxy] Failed to proxy ${req.method} ${fullPath}: ${error.message}`);
+    }
+    
     res.status(502).json({
       error: 'AI Engine proxy failed',
       message: error.message,

@@ -10,7 +10,7 @@ import logging
 import os
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -126,30 +126,32 @@ class TTSEngine:
         """Return available SAPI5 voices with id, name, gender, and culture."""
         return _list_voices_powershell()
 
-    def synthesize(self, text: str) -> bytes:
+    def synthesize(self, text: str, overrides: TTSSettings | None = None) -> bytes:
         if not text.strip():
             return b""
 
+        effective_settings = overrides if overrides is not None else self._settings
+
         if self._pyttsx3_engine is not None:
-            result = self._synthesize_pyttsx3(text)
+            result = self._synthesize_pyttsx3(text, effective_settings)
             if result:
                 return result
 
-        return self._synthesize_windows_speech(text)
+        return self._synthesize_windows_speech(text, effective_settings)
 
     # ─── backend implementations ─────────────────────────────────────────────
 
-    def _synthesize_pyttsx3(self, text: str) -> bytes:
+    def _synthesize_pyttsx3(self, text: str, settings: TTSSettings) -> bytes:
         engine = self._pyttsx3_engine
         output_path = ""
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
                 output_path = f.name
 
-            engine.setProperty("rate", self._settings.rate)
-            engine.setProperty("volume", self._settings.volume)
-            if self._settings.voice_id:
-                engine.setProperty("voice", self._settings.voice_id)
+            engine.setProperty("rate", settings.rate)
+            engine.setProperty("volume", settings.volume)
+            if settings.voice_id:
+                engine.setProperty("voice", settings.voice_id)
 
             engine.save_to_file(text.strip(), output_path)
             engine.runAndWait()
@@ -166,7 +168,7 @@ class TTSEngine:
             if output_path and os.path.exists(output_path):
                 os.unlink(output_path)
 
-    def _synthesize_windows_speech(self, text: str) -> bytes:
+    def _synthesize_windows_speech(self, text: str, settings: TTSSettings) -> bytes:
         """PowerShell / System.Speech fallback with rate and volume support."""
         script = r"""
 param([string]$OutputPath, [string]$SpeakText, [int]$SapiRate, [int]$VolumePct, [string]$VoiceName)
@@ -191,9 +193,9 @@ $synth.Dispose()
                 f.write(script)
                 script_path = f.name
 
-            sapi_rate = _wpm_to_sapi_rate(self._settings.rate)
-            volume_pct = int(self._settings.volume * 100)
-            voice_name = self._settings.voice_id or ""
+            sapi_rate = _wpm_to_sapi_rate(settings.rate)
+            volume_pct = int(settings.volume * 100)
+            voice_name = settings.voice_id or ""
 
             result = subprocess.run(
                 [

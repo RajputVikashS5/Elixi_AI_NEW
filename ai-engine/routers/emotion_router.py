@@ -57,7 +57,14 @@ async def detect_emotion(body: EmotionRequest) -> EmotionResponse:
     else:
         # Use provided webcam metrics from request (if any)
         signals.append(
-            await asyncio.to_thread(webcam_analyzer.analyze, body.webcam_face_engagement, body.webcam_eye_strain)
+            await asyncio.to_thread(
+                webcam_analyzer.analyze,
+                body.webcam_face_engagement,
+                body.webcam_eye_strain,
+                body.webcam_facial_expression,
+                body.webcam_expression_confidence,
+                body.webcam_facial_cues,
+            )
         )
     
     final = await asyncio.to_thread(aggregator.aggregate, signals)

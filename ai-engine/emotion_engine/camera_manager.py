@@ -112,10 +112,13 @@ class CameraEmotionManager:
                     "summary": "Camera available but no face detected",
                 }
             
-            # Use the WebcamAnalyzer to interpret metrics
+            # Use the WebcamAnalyzer with all available signals including facial expression
             emotion = self.analyzer.analyze(
                 face_engagement=metrics.get("face_engagement"),
                 eye_strain=metrics.get("eye_strain"),
+                facial_expression=metrics.get("facial_expression"),
+                expression_confidence=metrics.get("expression_confidence"),
+                facial_cues=metrics.get("facial_cues"),
             )
             
             # Add extra metrics for debugging
@@ -125,6 +128,8 @@ class CameraEmotionManager:
                 "blink_rate": metrics.get("blink_rate"),
                 "eye_openness": metrics.get("eye_openness"),
                 "looking_at_screen": metrics.get("looking_at_screen"),
+                "facial_expression": metrics.get("facial_expression"),
+                "expression_confidence": metrics.get("expression_confidence"),
             }
             
             return emotion

@@ -207,18 +207,49 @@ export const voiceService = {
     return { ...state };
   },
 
-  async synthesize(text: string) {
-    const payload = { text };
+  async synthesize(
+    text: string,
+    emotionState?: 'neutral' | 'focused' | 'stressed' | 'fatigued' | 'frustrated' | 'motivated',
+  ) {
+    const payload = {
+      text,
+      emotion_state: emotionState,
+    };
     try {
+      // First attempt with reasonable timeout - fail fast on timeout
       const res = await axios.post(`${VOICE_ENGINE_URL}/voice/tts`, payload, { timeout: 30000 });
       return res.data;
     } catch (error) {
-      logger.warn('Voice TTS request failed on first attempt; retrying once', {
-        voiceEngineUrl: VOICE_ENGINE_URL,
+      // If it's a timeout, don't retry - voice engine may be slow or unresponsive on startup
+      if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
+        logger.warn('Voice TTS request timed out (30s). Voice engine may be initializing.', {
+          voiceEngineUrl: VOICE_ENGINE_URL,
+        });
+        throw error;
+      }
+      
+      // For other errors (connection refused, etc), retry once
+      if (axios.isAxiosError(error) && ['ECONNREFUSED', 'ECONNRESET'].includes(error.code || '')) {
+        logger.debug('Voice TTS connection failed; retrying once', {
+          voiceEngineUrl: VOICE_ENGINE_URL,
+          error: error.code,
+        });
+        try {
+          const retryRes = await axios.post(`${VOICE_ENGINE_URL}/voice/tts`, payload, { timeout: 30000 });
+          return retryRes.data;
+        } catch (retryError) {
+          logger.warn('Voice TTS retry failed', {
+            error: retryError instanceof Error ? retryError.message : String(retryError),
+          });
+          throw retryError;
+        }
+      }
+
+      // Unknown error, rethrow immediately
+      logger.warn('Voice TTS request failed', {
         error: error instanceof Error ? error.message : String(error),
       });
-      const retryRes = await axios.post(`${VOICE_ENGINE_URL}/voice/tts`, payload, { timeout: 60000 });
-      return retryRes.data;
+      throw error;
     }
   },
 
@@ -242,7 +273,8 @@ export const voiceService = {
       const res = await axios.get(`${VOICE_ENGINE_URL}/voice/capabilities`, { timeout: 5000 });
       return res.data;
     } catch (error) {
-      logger.warn('Voice capabilities unavailable; returning degraded capability set', {
+      // Log at debug level since this is expected during startup
+      logger.debug('Voice capabilities unavailable; returning degraded capability set', {
         voiceEngineUrl: VOICE_ENGINE_URL,
         error: error instanceof Error ? error.message : String(error),
       });

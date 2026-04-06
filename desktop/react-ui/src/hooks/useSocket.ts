@@ -127,7 +127,7 @@ export function useSocket(options: UseSocketOptions = {}) {
   const enableRealtimeHandlers = options.enableRealtimeHandlers ?? true;
   const { backendUrl, voiceEnabled } = useSettingsStore();
   const { appendToken, updateMessage, setStreaming } = useChatStore();
-  const { updateEmotion } = useEmotionStore();
+  const { updateEmotion, emotion } = useEmotionStore();
   const { setStatus, setTranscript } = useVoiceStore();
   const currentMsgId = useRef<string | null>(null);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -173,7 +173,7 @@ export function useSocket(options: UseSocketOptions = {}) {
     }
 
     try {
-      const tts = await voiceService.tts(text);
+      const tts = await voiceService.tts(text, emotion.state);
       const payload = tts?.data;
       if (!tts?.success || !payload?.audioBase64) {
         return;
@@ -208,7 +208,7 @@ export function useSocket(options: UseSocketOptions = {}) {
         console.warn('[ELIXI] Browser speech synthesis also failed');
       }
     }
-  }, [setStatus, voiceEnabled]);
+  }, [emotion.state, setStatus, voiceEnabled]);
 
   useEffect(() => {
     if (socket && socketBaseUrl !== backendUrl) {

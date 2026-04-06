@@ -1,15 +1,66 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, CameraOff, X } from 'lucide-react';
 import { api } from '../../services/api';
+import { useEmotionStore, EmotionState } from '../../store/emotionStore';
+
+type CameraEmotionStatusResponse = {
+  status?: {
+    enabled?: boolean;
+    active?: boolean;
+    ready?: boolean;
+    message?: string;
+  } | string;
+  emotion_signal?: {
+    state?: string;
+    confidence?: number;
+    summary?: string;
+    enabled?: boolean;
+    raw_metrics?: {
+      facial_expression?: string;
+      expression_confidence?: number;
+      face_engagement?: number;
+      eye_strain?: number;
+      blink_rate?: number;
+      eye_openness?: number;
+      looking_at_screen?: boolean;
+    };
+    facial_cues?: {
+      smile?: number;
+      frown?: number;
+      raised_brows?: number;
+      squint?: number;
+      eye_wideness?: number;
+    };
+  };
+};
+
+function normalizeEmotionState(value: string | undefined): EmotionState {
+  if (value === 'focused' || value === 'stressed' || value === 'fatigued' || value === 'frustrated' || value === 'motivated') {
+    return value;
+  }
+  return 'neutral';
+}
 
 export const CameraPreview: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recoveryAttemptedRef = useRef(false);
+  const updateEmotion = useEmotionStore((s) => s.updateEmotion);
   const [enabled, setEnabled] = useState(true);
+  const [emotionRecognizerEnabled, setEmotionRecognizerEnabled] = useState(true);
   const [status, setStatus] = useState<'idle' | 'ready' | 'blocked' | 'error'>('idle');
   const [errorDetail, setErrorDetail] = useState<string>('');
+  const [cameraEmotion, setCameraEmotion] = useState<{ 
+    state: string; 
+    confidence: number; 
+    summary?: string;
+    facial_expression?: string;
+    expression_confidence?: number;
+    facial_cues?: Record<string, number>;
+    raw_metrics?: Record<string, any>;
+  } | null>(null);
+  const [cameraEmotionError, setCameraEmotionError] = useState<string>('');
   const [position, setPosition] = useState<{ x: number; y: number }>(() => {
     const width = 224; // sm:w-56
     const height = 170;
@@ -22,23 +73,6 @@ export const CameraPreview: React.FC = () => {
   useEffect(() => {
     let mounted = true;
     let frameTimeout: number | null = null;
-
-    /**
-     * Release camera from backend AI engine.
-     * Uses the unified API service.
-     */
-    const releaseBackendCamera = async (): Promise<boolean> => {
-      try {
-        console.log('[CameraPreview] Releasing backend camera...');
-        const response = await api.post('/ai/camera/disable');
-        console.log('[CameraPreview] Backend camera released:', response.data);
-        return true;
-      } catch (error) {
-        console.warn('[CameraPreview] Failed to release backend camera:', error);
-        // Continue anyway; camera might not be in use
-        return false;
-      }
-    };
 
     const startPreview = async () => {
       if (!enabled) {
@@ -53,10 +87,6 @@ export const CameraPreview: React.FC = () => {
 
       try {
         setErrorDetail('');
-
-        // Prefer renderer preview ownership when this widget is visible.
-        await releaseBackendCamera();
-        await new Promise((resolve) => window.setTimeout(resolve, 180));
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -118,24 +148,12 @@ export const CameraPreview: React.FC = () => {
           setStatus('blocked');
           setErrorDetail('Permission denied. Allow camera access for ELIXI.');
         } else if (name === 'NotReadableError' || name === 'TrackStartError') {
-          // Busy camera can happen if backend analysis owns the webcam.
-          if (!recoveryAttemptedRef.current) {
-            recoveryAttemptedRef.current = true;
-            setStatus('idle');
-            setErrorDetail('Camera busy. Releasing backend camera...');
-
-            const released = await releaseBackendCamera();
-            if (released) {
-              await new Promise((resolve) => window.setTimeout(resolve, 350));
-              if (mounted) {
-                await startPreview();
-              }
-              return;
-            }
-          }
-
           setStatus('error');
-          setErrorDetail('Camera is in use by another app/process.');
+          if (emotionRecognizerEnabled) {
+            setErrorDetail('Camera is currently owned by live emotion recognizer.');
+          } else {
+            setErrorDetail('Camera is in use by another app/process.');
+          }
         } else {
           setStatus('error');
           setErrorDetail((error as Error)?.message || 'Unable to start camera preview.');
@@ -172,7 +190,73 @@ export const CameraPreview: React.FC = () => {
       mounted = false;
       stopPreview();
     };
-  }, [enabled]);
+  }, [enabled, emotionRecognizerEnabled]);
+
+  useEffect(() => {
+    let mounted = true;
+    let pollInterval: number | null = null;
+
+    const syncRecognizer = async () => {
+      try {
+        if (emotionRecognizerEnabled) {
+          await api.post('/ai/camera/enable');
+        } else {
+          await api.post('/ai/camera/disable');
+        }
+      } catch {
+        // Keep UI resilient even if AI engine is temporarily unavailable.
+      }
+    };
+
+    const pollStatus = async () => {
+      if (!mounted || !enabled) {
+        return;
+      }
+
+      try {
+        const response = await api.get<CameraEmotionStatusResponse>('/ai/camera/status');
+        const signal = response.data?.emotion_signal;
+        if (signal?.state) {
+          const confidence = typeof signal.confidence === 'number' ? signal.confidence : 0;
+          setCameraEmotion({
+            state: signal.state,
+            confidence,
+            summary: signal.summary,
+            facial_expression: signal.raw_metrics?.facial_expression,
+            expression_confidence: signal.raw_metrics?.expression_confidence,
+            facial_cues: signal.facial_cues,
+            raw_metrics: signal.raw_metrics,
+          });
+          setCameraEmotionError('');
+
+          if (confidence > 0) {
+            updateEmotion(normalizeEmotionState(signal.state), confidence, {
+              sources: ['webcam'],
+              summaries: signal.summary ? [signal.summary] : undefined,
+            });
+          }
+        } else {
+          setCameraEmotion(null);
+        }
+      } catch {
+        setCameraEmotion(null);
+        setCameraEmotionError('Emotion recognizer unavailable');
+      }
+    };
+
+    void syncRecognizer();
+    void pollStatus();
+    pollInterval = window.setInterval(() => {
+      void pollStatus();
+    }, 2000);
+
+    return () => {
+      mounted = false;
+      if (pollInterval !== null) {
+        window.clearInterval(pollInterval);
+      }
+    };
+  }, [enabled, emotionRecognizerEnabled, updateEmotion]);
 
   const statusText =
     status === 'blocked'
@@ -228,14 +312,24 @@ export const CameraPreview: React.FC = () => {
             {enabled ? <Camera size={12} /> : <CameraOff size={12} />}
             <span>{statusText}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setEnabled((prev) => !prev)}
-            className="text-elixi-muted hover:text-elixi-text transition-colors"
-            title={enabled ? 'Hide camera preview' : 'Show camera preview'}
-          >
-            {enabled ? <X size={12} /> : <Camera size={12} />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setEmotionRecognizerEnabled((prev) => !prev)}
+              className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${emotionRecognizerEnabled ? 'bg-emerald-500/25 text-emerald-300' : 'bg-white/10 text-elixi-muted hover:text-elixi-text'}`}
+              title={emotionRecognizerEnabled ? 'Disable live emotion recognizer' : 'Enable live emotion recognizer'}
+            >
+              {emotionRecognizerEnabled ? 'Emotion On' : 'Emotion Off'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEnabled((prev) => !prev)}
+              className="text-elixi-muted hover:text-elixi-text transition-colors"
+              title={enabled ? 'Hide camera preview' : 'Show camera preview'}
+            >
+              {enabled ? <X size={12} /> : <Camera size={12} />}
+            </button>
+          </div>
         </div>
 
         <div className="relative aspect-video bg-black/60">
@@ -256,6 +350,54 @@ export const CameraPreview: React.FC = () => {
                 : status === 'error'
                   ? (errorDetail || 'Camera unavailable.')
                   : 'Camera preview is off.'}
+            </div>
+          )}
+
+          {enabled && emotionRecognizerEnabled && (
+            <div className="absolute left-2 bottom-2 right-2 rounded-md bg-black/65 border border-cyan-400/40 px-2 py-1.5 text-[10px] text-white space-y-1">
+              {cameraEmotion ? (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-semibold text-cyan-300">
+                      {cameraEmotion.state.toUpperCase()}
+                    </span>
+                    <span className="text-cyan-400 tabular-nums">
+                      {Math.round(cameraEmotion.confidence * 100)}%
+                    </span>
+                  </div>
+                  {cameraEmotion.summary && (
+                    <div className="text-[9px] text-cyan-100/80 truncate">
+                      {cameraEmotion.summary}
+                    </div>
+                  )}
+                  {cameraEmotion.facial_cues && (
+                    <div className="grid grid-cols-2 gap-1 text-[8px] pt-0.5 border-t border-cyan-400/20">
+                      {cameraEmotion.facial_cues.smile !== undefined && cameraEmotion.facial_cues.smile > 0.2 && (
+                        <div className="text-yellow-300">😊 Smile: {Math.round(cameraEmotion.facial_cues.smile * 100)}%</div>
+                      )}
+                      {cameraEmotion.facial_cues.frown !== undefined && cameraEmotion.facial_cues.frown > 0.2 && (
+                        <div className="text-orange-300">🤨 Frown: {Math.round(cameraEmotion.facial_cues.frown * 100)}%</div>
+                      )}
+                      {cameraEmotion.facial_cues.raised_brows !== undefined && cameraEmotion.facial_cues.raised_brows > 0.2 && (
+                        <div className="text-purple-300">👁️ Raised Brows: {Math.round(cameraEmotion.facial_cues.raised_brows * 100)}%</div>
+                      )}
+                      {cameraEmotion.facial_cues.squint !== undefined && cameraEmotion.facial_cues.squint > 0.2 && (
+                        <div className="text-blue-300">🎯 Focus: {Math.round(cameraEmotion.facial_cues.squint * 100)}%</div>
+                      )}
+                    </div>
+                  )}
+                  {cameraEmotion.raw_metrics && (
+                    <div className="text-[8px] text-slate-300/70 space-y-0.5 pt-0.5 border-t border-cyan-400/20">
+                      <div>Engagement: {Math.round((cameraEmotion.raw_metrics.face_engagement || 0) * 100)}%</div>
+                      <div>Eye Strain: {Math.round((cameraEmotion.raw_metrics.eye_strain || 0) * 100)}%</div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span className="text-slate-200">
+                  {cameraEmotionError || 'Analyzing expressions...'}
+                </span>
+              )}
             </div>
           )}
         </div>

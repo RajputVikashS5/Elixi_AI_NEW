@@ -120,42 +120,210 @@ class FaceEngagementDetector:
 
 
 class FacialExpressionDetector:
-    """Detects emotional cues from facial expressions."""
+    """Detects emotional cues from facial expressions using facial landmarks."""
     
     def __init__(self):
         self.expression_history = deque(maxlen=30)
+        # Landmark indices for key facial features
+        # Reference: https://github.com/google/mediapipe/blob/master/mediapipe/surplus/face_mesh_indices.txt
+        self.LEFT_EYE = [362, 385, 387, 263, 373, 380]
+        self.RIGHT_EYE = [33, 160, 158, 133, 153, 144]
+        self.MOUTH_CORNERS = [61, 291]  # Left and right corner of mouth
+        self.MOUTH_TOP = [13]  # Top of mouth
+        self.MOUTH_BOTTOM = [14]  # Bottom of mouth
+        self.LEFT_EYEBROW = [105, 107, 66, 63, 70]  # Inner to outer
+        self.RIGHT_EYEBROW = [336, 296, 334, 293, 300]  # Inner to outer
+        self.JAW_LINE = [152, 148, 176, 149, 150, 136, 172, 58]  # For jaw detection
         
-    def detect_from_landmarks(self, landmarks: Any) -> Dict[str, Any]:
+    @staticmethod
+    def _distance(pt1: Any, pt2: Any) -> float:
+        """Calculate distance between two landmarks."""
+        return ((pt1.x - pt2.x)**2 + (pt1.y - pt2.y)**2)**0.5
+    
+    def _analyze_mouth(self, landmarks: Any) -> Dict[str, float]:
+        """Analyze mouth expression (smile, frown, tension)."""
+        try:
+            mouth_left = landmarks.landmark[61]
+            mouth_right = landmarks.landmark[291]
+            mouth_top = landmarks.landmark[13]
+            mouth_bottom = landmarks.landmark[14]
+            
+            # Mouth width
+            mouth_width = self._distance(mouth_left, mouth_right)
+            
+            # Mouth height (openness)
+            mouth_height = self._distance(mouth_top, mouth_bottom)
+            
+            # Mouth corners vertical position (positive = smile, negative = frown)
+            mouth_corner_angle = (mouth_left.y + mouth_right.y) / 2 - mouth_top.y
+            
+            # Lip tension (how far corners are from relaxed position)
+            corner_avg = (mouth_left.y + mouth_right.y) / 2
+            
+            return {
+                "width": mouth_width,
+                "height": mouth_height,
+                "corner_angle": mouth_corner_angle,
+                "smile_score": max(0, -mouth_corner_angle * 2),  # Higher when corners rise (smile)
+                "frown_score": max(0, mouth_corner_angle * 2),   # Higher when corners drop (frown)
+            }
+        except Exception as e:
+            logger.debug("Error analyzing mouth: %s", e)
+            return {}
+    
+    def _analyze_eyebrows(self, landmarks: Any) -> Dict[str, float]:
+        """Analyze eyebrow position (concern, surprise, focus)."""
+        try:
+            left_brow_inner = landmarks.landmark[105]
+            left_brow_outer = landmarks.landmark[70]
+            right_brow_inner = landmarks.landmark[336]
+            right_brow_outer = landmarks.landmark[300]
+            
+            left_eye_top = landmarks.landmark[159]
+            right_eye_top = landmarks.landmark[27]
+            
+            # Eyebrow raise (distance from eye)
+            left_raise = left_brow_inner.y - left_eye_top.y
+            right_raise = right_brow_inner.y - right_eye_top.y
+            
+            avg_raise = (left_raise + right_raise) / 2
+            raise_score = max(0, -avg_raise * 3)  # Negative y = raised (surprise/concern)
+            
+            return {
+                "left_raise": left_raise,
+                "right_raise": right_raise,
+                "avg_raise": avg_raise,
+                "raise_score": raise_score,  # Higher = raised eyebrows (concern/surprise)
+            }
+        except Exception as e:
+            logger.debug("Error analyzing eyebrows: %s", e)
+            return {}
+    
+    def _analyze_eyes(self, landmarks: Any) -> Dict[str, float]:
+        """Analyze eye expression (wide, squinting, intensity)."""
+        try:
+            # Eye openness (similar to EAR)
+            left_eye_pts = [landmarks.landmark[i] for i in self.LEFT_EYE]
+            right_eye_pts = [landmarks.landmark[i] for i in self.RIGHT_EYE]
+            
+            def calculate_ear(pts):
+                if len(pts) >= 6:
+                    d1 = self._distance(pts[1], pts[5])
+                    d2 = self._distance(pts[2], pts[4])
+                    d3 = self._distance(pts[0], pts[3])
+                    return (d1 + d2) / (2.0 * d3) if d3 > 0 else 0
+                return 0
+            
+            left_ear = calculate_ear(left_eye_pts)
+            right_ear = calculate_ear(right_eye_pts)
+            avg_ear = (left_ear + right_ear) / 2
+            
+            # Eye wideness (intensity/alertness)
+            wideness_score = max(0, (avg_ear - 4.0) / 2)  # Normalized ~4-6 range
+            
+            # Eye squinting (focus/stress)
+            squint_score = max(0, (5.5 - avg_ear) / 2)  # Inverse - lower = squinting
+            
+            return {
+                "left_ear": left_ear,
+                "right_ear": right_ear,
+                "avg_ear": avg_ear,
+                "wideness_score": wideness_score,   # Higher = wide alert eyes
+                "squint_score": squint_score,       # Higher = squinting/focused
+            }
+        except Exception as e:
+            logger.debug("Error analyzing eyes: %s", e)
+            return {}
+    
+    def detect_from_landmarks(self, landmarks: Any, engagement: float = 0.5, eye_strain: float = 0.0) -> Dict[str, Any]:
         """Detect emotional expressions from facial landmarks.
         
         Args:
             landmarks: Mediapipe face landmarks
+            engagement: User engagement score (0-1)
+            eye_strain: Eye strain score (0-1)
             
         Returns:
-            Dict with detected emotions
+            Dict with detected emotions including state and confidence
         """
         if landmarks is None:
-            return {"state": "unknown", "confidence": 0.0}
-        
-        # Note: Full facial expression analysis would require more sophisticated
-        # ML models (like facial action units). For now, we provide a simpler
-        # heuristic approach based on mouth and eye regions.
+            return {"state": "neutral", "confidence": 0.0, "summary": "No face detected"}
         
         try:
-            # Simple heuristics based on key landmarks
-            # Landmark indices: 13=left eye, 14=right eye, 78=mouth
+            # Analyze facial components
+            mouth = self._analyze_mouth(landmarks)
+            eyebrows = self._analyze_eyebrows(landmarks)
+            eyes = self._analyze_eyes(landmarks)
             
-            # This is a simplified approach - real implementation would use
-            # proper facial action unit detection or emotion classifiers
+            # Combine scores to determine emotion
+            smile_score = mouth.get("smile_score", 0) * 0.6  # Weight smile heavily
+            frown_score = mouth.get("frown_score", 0) * 0.6
+            raise_score = eyebrows.get("raise_score", 0) * 0.3
+            squint_score = eyes.get("squint_score", 0) * 0.4
+            wideness_score = eyes.get("wideness_score", 0) * 0.3
+            
+            # Combine with context (engagement, eye strain)
+            engagement_score = engagement * 0.5
+            strain_score = eye_strain * 0.4
+            
+            # Determine primary emotion
+            scores = {
+                "motivated": smile_score + engagement_score + wideness_score * 0.5,
+                "focused": engagement_score * 1.2 + squint_score + wideness_score * 0.3,
+                "stressed": (eye_strain * 0.7 + raise_score * 0.8 + squint_score * 0.6 + 
+                           frown_score * 0.5),
+                "frustrated": frown_score * 1.2 + (1 - engagement_score) * 0.5 + raise_score * 0.4,
+                "fatigued": (1 - wideness_score) * 0.8 + eye_strain * 0.6 + 
+                           (1 - engagement_score) * 0.3,
+            }
+            
+            # Find dominant emotion
+            max_emotion = max(scores.items(), key=lambda x: x[1])
+            dominant_emotion = max_emotion[0]
+            raw_confidence = min(max_emotion[1] / 3.0, 1.0)  # Normalize to 0-1
+            
+            # Ensure minimum confidence threshold
+            confidence = max(raw_confidence, 0.25) if raw_confidence > 0.1 else 0.0
+            
+            # Generate summary
+            summary_parts = []
+            if smile_score > 0.3:
+                summary_parts.append("positive expression")
+            elif frown_score > 0.3:
+                summary_parts.append("frowning")
+            if raise_score > 0.3:
+                summary_parts.append("raised eyebrows")
+            if squint_score > 0.3:
+                summary_parts.append("focused/intense look")
+            if eye_strain > 0.6:
+                summary_parts.append("eye strain visible")
+            if engagement < 0.3:
+                summary_parts.append("looking away")
+            
+            summary = ", ".join(summary_parts) if summary_parts else "neutral expression"
+            
+            self.expression_history.append({
+                "state": dominant_emotion,
+                "confidence": confidence,
+                "scores": scores,
+            })
             
             return {
-                "state": "neutral",
-                "confidence": 0.3,
-                "summary": "Facial expression analysis available",
+                "state": dominant_emotion,
+                "confidence": confidence,
+                "summary": summary,
+                "raw_scores": scores,
+                "facial_cues": {
+                    "smile": smile_score,
+                    "frown": frown_score,
+                    "raised_brows": raise_score,
+                    "squint": squint_score,
+                    "eye_wideness": wideness_score,
+                }
             }
         except Exception as e:
             logger.warning("Error detecting facial expression: %s", e)
-            return {"state": "unknown", "confidence": 0.0}
+            return {"state": "neutral", "confidence": 0.0, "summary": "Expression analysis error"}
 
 
 class WebcamCapture:
@@ -216,7 +384,17 @@ class WebcamCapture:
         try:
             self.cap = cv2.VideoCapture(self.camera_index)
             if not self.cap.isOpened():
-                logger.error("Failed to open camera %d", self.camera_index)
+                logger.error("Failed to open camera %d (device may not exist or is in use)", self.camera_index)
+                self.enabled = False
+                self.cap = None
+                return
+            
+            # Try to read one frame to verify camera is actually working
+            ret, _ = self.cap.read()
+            if not ret:
+                logger.error("Camera opened but failed to read frame. Check if device is in use or drivers are working.")
+                self.cap.release()
+                self.cap = None
                 self.enabled = False
                 return
             
@@ -227,6 +405,9 @@ class WebcamCapture:
         except Exception as e:
             logger.error("Error starting webcam capture: %s", e)
             self.enabled = False
+            if self.cap:
+                self.cap.release()
+                self.cap = None
     
     def stop(self):
         """Stop webcam capture thread."""
@@ -257,17 +438,29 @@ class WebcamCapture:
                     self._consecutive_read_failures += 1
 
                     now = time.time()
-                    if (now - self._last_read_warning_at) >= 2.0:
-                        logger.warning(
-                            "Failed to read frame from camera (streak=%d)",
-                            self._consecutive_read_failures,
-                        )
+                    # Only log on first failure or periodically (not every cycle)
+                    if (now - self._last_read_warning_at) >= 5.0:  # Log every 5 seconds max
+                        if self._consecutive_read_failures == 1:
+                            logger.warning("Camera read failed. Device may be in use or inaccessible.")
+                        elif self._consecutive_read_failures % 100 == 0:
+                            logger.warning("Camera read failures continue (%d). Consider disabling camera.", self._consecutive_read_failures)
                         self._last_read_warning_at = now
 
-                    # Avoid tight spin-loop when camera is busy/unavailable.
-                    time.sleep(0.12)
+                    # After prolonged failures, disable camera to stop logging noise
+                    if self._consecutive_read_failures >= 100:
+                        logger.error("Camera disabled after 100 consecutive read failures")
+                        self.running = False
+                        self.enabled = False
+                        if self.cap:
+                            self.cap.release()
+                            self.cap = None
+                        break
 
-                    # After prolonged failures, mark metrics as unavailable to reduce stale state.
+                    # Exponential backoff to reduce CPU spinning
+                    backoff_time = min(0.1 * (1 + self._consecutive_read_failures / 200), 2.0)
+                    time.sleep(backoff_time)
+
+                    # After prolonged failures, mark metrics as unavailable
                     if self._consecutive_read_failures >= 25:
                         with self.lock:
                             self.last_metrics["face_detected"] = False
@@ -314,14 +507,29 @@ class WebcamCapture:
                     eye_metrics = self.eye_strain_detector.update(left_eye_ear, right_eye_ear)
                     engagement_metrics = self.engagement_detector.update(face_x, face_y, w, h)
                     
-                    # Store metrics
+                    # Get engagement and strain scores for expression analysis
+                    engagement_score = engagement_metrics["average_engagement"]
+                    strain_score = eye_metrics["strain_score"]
+                    
+                    # Analyze facial expressions
+                    expression = self.expression_detector.detect_from_landmarks(
+                        landmarks,
+                        engagement=engagement_score,
+                        eye_strain=strain_score
+                    )
+                    
+                    # Store metrics with facial expression data
                     self.last_metrics = {
                         "face_detected": True,
-                        "face_engagement": engagement_metrics["average_engagement"],
-                        "eye_strain": eye_metrics["strain_score"],
+                        "face_engagement": engagement_score,
+                        "eye_strain": strain_score,
                         "blink_rate": eye_metrics["blink_rate"],
                         "eye_openness": eye_metrics["eye_openness"],
                         "looking_at_screen": engagement_metrics["looking_at_screen"],
+                        "facial_expression": expression.get("state", "neutral"),
+                        "expression_confidence": expression.get("confidence", 0),
+                        "expression_summary": expression.get("summary", ""),
+                        "facial_cues": expression.get("facial_cues", {}),
                         "timestamp": time.time(),
                     }
                 else:

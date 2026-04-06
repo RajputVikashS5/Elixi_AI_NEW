@@ -33,6 +33,7 @@ class TranscriptPayload(BaseModel):
 
 class TTSRequest(BaseModel):
     text: str
+    emotion_state: str | None = None
 
 
 class WakeWordPayload(BaseModel):
@@ -43,6 +44,31 @@ class VoiceSettingsPayload(BaseModel):
     rate: int | None = None        # WPM, 50–400
     volume: float | None = None    # 0.0–1.0
     voice_id: str | None = None    # SAPI voice ID or name substring
+
+
+def _emotion_tts_overrides(emotion_state: str | None, base: TTSSettings) -> TTSSettings:
+    emotion = (emotion_state or "neutral").strip().lower()
+    rate = base.rate
+    volume = base.volume
+
+    if emotion == "focused":
+        rate += 10
+        volume += 0.02
+    elif emotion == "motivated":
+        rate += 20
+        volume += 0.05
+    elif emotion in {"stressed", "frustrated"}:
+        rate -= 15
+        volume -= 0.08
+    elif emotion == "fatigued":
+        rate -= 30
+        volume -= 0.12
+
+    return TTSSettings(
+        rate=max(50, min(400, rate)),
+        volume=max(0.0, min(1.0, volume)),
+        voice_id=base.voice_id,
+    )
 
 
 async def broadcast_to_session(session_id: str, payload: dict) -> int:
@@ -298,7 +324,8 @@ async def speech_to_text(request: Request):
 @app.post("/voice/tts")
 @app.post("/tts")
 async def text_to_speech(payload: TTSRequest):
-    audio = await asyncio.to_thread(tts_engine.synthesize, payload.text)
+    overrides = _emotion_tts_overrides(payload.emotion_state, tts_engine._settings)
+    audio = await asyncio.to_thread(tts_engine.synthesize, payload.text, overrides)
     if not audio:
         raise HTTPException(status_code=502, detail="Failed to synthesize audio")
 

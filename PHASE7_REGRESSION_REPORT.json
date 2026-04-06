@@ -1,0 +1,77 @@
+﻿{
+    "generatedAt":  "2026-04-06T13:41:00.1300397+05:30",
+    "summary":  {
+                    "totalChecks":  11,
+                    "passed":  11,
+                    "failed":  0,
+                    "successRate":  100
+                },
+    "checks":  [
+                   {
+                       "name":  "Ensure AI Engine",
+                       "status":  "PASS",
+                       "durationMs":  95.2,
+                       "detail":  "already running"
+                   },
+                   {
+                       "name":  "Ensure Backend",
+                       "status":  "PASS",
+                       "durationMs":  38.1,
+                       "detail":  "already running"
+                   },
+                   {
+                       "name":  "Ensure Voice Engine",
+                       "status":  "PASS",
+                       "durationMs":  45.7,
+                       "detail":  "already running"
+                   },
+                   {
+                       "name":  "Ensure UI Dev Server",
+                       "status":  "PASS",
+                       "durationMs":  41.3,
+                       "detail":  "already running"
+                   },
+                   {
+                       "name":  "Backend Integration Tests",
+                       "status":  "PASS",
+                       "durationMs":  3303.6,
+                       "detail":  "ok"
+                   },
+                   {
+                       "name":  "Backend Build",
+                       "status":  "PASS",
+                       "durationMs":  3106,
+                       "detail":  "ok"
+                   },
+                   {
+                       "name":  "Frontend Build",
+                       "status":  "PASS",
+                       "durationMs":  12640.1,
+                       "detail":  "ok"
+                   },
+                   {
+                       "name":  "Phase 5 Deep Sweep",
+                       "status":  "PASS",
+                       "durationMs":  23030.6,
+                       "detail":  "Phase 5 deep sweep completed. Passed: 15 / 15 (Failed: 0, Success: 100%) Report: E:\\Projects\\Elixi AI Electron\\PHASE5_DEEP_SWEEP_REPORT.tmp.md JSON Report: E:\\Projects\\Elixi AI Electron\\PHASE5_DEEP_SWEEP_REPORT.tmp.json - Success rate: 100%"
+                   },
+                   {
+                       "name":  "Phase 6 Runtime Check",
+                       "status":  "PASS",
+                       "durationMs":  2563.9,
+                       "detail":  "passes=6"
+                   },
+                   {
+                       "name":  "Phase 7 Integrations API Wiring",
+                       "status":  "PASS",
+                       "durationMs":  79.9,
+                       "detail":  "providers=5 browserConnected=True vscodeConnected=True"
+                   },
+                   {
+                       "name":  "Phase 7 UI Route Reachability",
+                       "status":  "PASS",
+                       "durationMs":  42.7,
+                       "detail":  "ui reachable"
+                   }
+               ]
+}

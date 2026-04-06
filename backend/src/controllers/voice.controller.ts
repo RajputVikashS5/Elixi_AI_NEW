@@ -8,6 +8,7 @@ const startSchema = z.object({
 
 const ttsSchema = z.object({
   text: z.string().min(1).max(4000),
+  emotionState: z.enum(['neutral', 'focused', 'stressed', 'fatigued', 'frustrated', 'motivated']).optional(),
 });
 
 const wakeSchema = z.object({
@@ -73,7 +74,7 @@ export async function synthesizeSpeech(req: Request, res: Response, next: NextFu
       return res.status(400).json({ error: 'Invalid tts payload', details: parsed.error.issues });
     }
 
-    const data = await voiceService.synthesize(parsed.data.text);
+    const data = await voiceService.synthesize(parsed.data.text, parsed.data.emotionState);
     return res.json({ success: true, data });
   } catch (err) {
     next(err);

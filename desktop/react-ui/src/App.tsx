@@ -50,11 +50,20 @@ const App: React.FC = () => {
     const greetOnStartup = async () => {
       try {
         let healthy = false;
-        for (let attempt = 0; attempt < 4; attempt += 1) {
-          const status = await voiceService.getStatus();
-          if (status.engineHealthy) {
-            healthy = true;
-            break;
+        // Only try 2 times instead of 4, total wait ~3 seconds max
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const status = await Promise.race([
+              voiceService.getStatus(),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 5000)),
+            ]);
+            const statusData = status as any;
+            if (statusData?.engineHealthy) {
+              healthy = true;
+              break;
+            }
+          } catch (err) {
+            // Health check failed or timed out, continue to next attempt
           }
           await sleep(1000 * (attempt + 1));
           if (canceled) {
@@ -66,7 +75,22 @@ const App: React.FC = () => {
           return;
         }
 
-        const tts = await voiceService.tts(STARTUP_GREETING_TEXT);
+        // Use aggressive timeout for TTS - fail fast if voice engine is slow
+        const ttsFuture = voiceService.tts(STARTUP_GREETING_TEXT);
+        const ttsWithTimeout = Promise.race([
+          ttsFuture,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('TTS timeout')), 30000)), // 30 sec max for startup
+        ]);
+
+        let tts: any;
+        try {
+          tts = await ttsWithTimeout;
+        } catch (err) {
+          // TTS failed, skip greeting
+          if (canceled) setStatus('idle');
+          return;
+        }
+
         if (!tts?.success || !tts?.data?.audioBase64 || canceled) {
           return;
         }
@@ -90,7 +114,8 @@ const App: React.FC = () => {
 
         setStatus('speaking');
         await audio.play();
-      } catch {
+      } catch (err) {
+        // Silently fail for startup greeting - voice optional
         if (!canceled) {
           setStatus('idle');
         }

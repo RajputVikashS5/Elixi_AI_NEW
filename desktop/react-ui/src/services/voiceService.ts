@@ -27,6 +27,8 @@ export interface TtsAudioPayload {
   status: string;
 }
 
+export type EmotionToneState = 'neutral' | 'focused' | 'stressed' | 'fatigued' | 'frustrated' | 'motivated';
+
 export const voiceService = {
   getStatus: async (): Promise<VoiceStatusResponse> => {
     const res = await api.get<VoiceStatusResponse>('/api/voice/status');
@@ -48,10 +50,10 @@ export const voiceService = {
     return res.data;
   },
 
-  tts: async (text: string) => {
+  tts: async (text: string, emotionState?: EmotionToneState) => {
     const res = await api.post<{ success: boolean; data: TtsAudioPayload }>(
       '/api/voice/tts',
-      { text },
+      { text, emotionState },
       { timeout: 90000 },
     );
     return res.data;
