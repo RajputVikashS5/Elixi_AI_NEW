@@ -48,6 +48,39 @@ function normalizeActions(actions: unknown[] | undefined): ActionResult[] | unde
   return normalized.length ? normalized : undefined;
 }
 
+function stripSpeechMarkup(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s{0,3}[#>*-]\s+/gm, '')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/\{\s*"[^"]+"\s*:\s*[^}]+\}/g, ' ')
+    .replace(/[\*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function speakWithBrowser(text: string): Promise<boolean> {
+  const speechApi = window.speechSynthesis;
+  if (!speechApi || typeof SpeechSynthesisUtterance === 'undefined') {
+    return false;
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    try {
+      speechApi.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      utterance.onend = () => resolve(true);
+      utterance.onerror = () => resolve(false);
+      speechApi.speak(utterance);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 export type SocketConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed';
 
 export type AutomationProgressStatus = 'started' | 'running' | 'success' | 'failed' | 'completed';
@@ -130,7 +163,7 @@ export function useSocket(options: UseSocketOptions = {}) {
   }, [clearStreamWatchdog, setStreaming, updateMessage]);
 
   const playAssistantTts = useCallback(async (replyText: string) => {
-    const text = replyText.trim();
+    const text = stripSpeechMarkup(replyText);
     if (!voiceEnabled || !text) {
       return;
     }
@@ -164,8 +197,12 @@ export function useSocket(options: UseSocketOptions = {}) {
       setStatus('speaking');
       await audio.play();
     } catch (err) {
-      console.warn('[ELIXI] Assistant TTS playback failed', err);
+      console.warn('[ELIXI] Assistant TTS playback failed, falling back to browser speech', err);
+      const spoken = await speakWithBrowser(text);
       setStatus('idle');
+      if (!spoken) {
+        console.warn('[ELIXI] Browser speech synthesis also failed');
+      }
     }
   }, [setStatus, voiceEnabled]);
 
@@ -249,10 +286,11 @@ export function useSocket(options: UseSocketOptions = {}) {
       }
     };
 
-    const onChatComplete = ({ actions, intent, error, message }: {
+    const onChatComplete = ({ actions, intent, voiceTone, error, message }: {
       messageId: string;
       actions?: unknown[];
       intent?: string;
+      voiceTone?: string;
       error?: boolean;
       message?: string;
     }) => {
@@ -272,6 +310,7 @@ export function useSocket(options: UseSocketOptions = {}) {
           isStreaming: false,
           actions: normalizedActions,
           intent,
+          voiceTone,
           ...(nextContent ? { content: nextContent } : {}),
           ...(error ? { intent: intent || 'chat.error' } : {}),
         });

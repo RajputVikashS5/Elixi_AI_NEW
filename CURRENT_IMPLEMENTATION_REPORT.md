@@ -1,42 +1,42 @@
 # ELIXI Current Implementation Report
 
-Date: March 23, 2026
-Scope: Codebase inspection and implementation-progress update for the current workspace state
-Status: Core desktop, backend, AI, memory, workflow, and startup orchestration layers are implemented with production-oriented fallback routing (Gemini/OpenRouter/Ollama), improved runtime resilience, and baseline offline voice support.
+Date: April 6, 2026
+Scope: Current workspace implementation status after recent code and UI updates
+Status: Core desktop, backend, AI, memory, workflow, voice, and startup orchestration layers are implemented. Chat responses now support live system stats, audible playback, and cleaner response rendering. Remaining work is mostly in voice robustness, richer memory intelligence, and higher-quality adaptive behavior.
 
 ## 1. Executive Summary
 
-ELIXI is currently implemented as a local-first desktop assistant split across four active layers:
+ELIXI is implemented as a local-first desktop assistant split across four active layers:
 
 - Electron desktop shell
 - React UI
 - Node.js backend
 - Python AI engine
 
-The project already supports local chat, session/history persistence, facts and habits storage, workflow execution, permission-gated automation, Electron IPC integration, and backend-to-AI/voice service bridging.
+The project already supports chat, session/history persistence, facts and habits storage, workflow execution, permission-gated automation, Electron IPC integration, backend-to-AI/voice service bridging, live system-info responses, and audible assistant replies.
 
-The architecture described in the main documentation broadly matches the repository, but some roadmap features are not fully implemented yet. The largest gaps are in the voice stack, vector memory, and deeper adaptive or proactive intelligence features.
+The architecture described in the main documentation broadly matches the repository. The biggest remaining gaps are in the voice stack, deeper semantic memory, and stronger adaptive intelligence.
 
-## 1A. Implementation Progress Snapshot (March 23, 2026)
+## 1A. Implementation Progress Snapshot
 
-| Area | Progress | Current State |
+| Area | Status | Current State |
 |---|---:|---|
-| Desktop + UI integration | 92% | Stable multi-page desktop app with socket chat and voice state surfaces |
-| Backend orchestration | 94% | Express + Socket.io with hardened streaming, retries, and health coverage |
-| AI provider integration | 95% | Gemini + OpenRouter + Ollama with fallback chain and `/ai/chat` endpoint |
-| Memory + persistence | 86% | Shared SQLite persistence with semantic retrieval baseline |
-| Automation + permissions | 91% | Workflow execution, safety validation, and auditability in place |
-| Voice pipeline | 83% | Offline-capable STT/TTS and stream bridge working, with quality/coverage refinements pending |
-| Startup reliability | 96% | Root-level startup health checks with 8/8 pass validation in current run |
+| Desktop + UI integration | Implemented | Stable multi-page desktop app with chat, settings, voice state, and system UI surfaces |
+| Backend orchestration | Implemented | Express + Socket.io with retries, health checks, rate limiting, and streaming support |
+| AI provider integration | Implemented | Gemini + OpenRouter + Ollama fallback routing across backend and AI engine |
+| Memory + persistence | Implemented | Shared SQLite persistence with sessions, messages, facts, habits, and audit log |
+| Automation + permissions | Implemented | Workflow execution, safety validation, and auditability are in place |
+| Voice pipeline | Implemented (baseline) | Offline-capable STT/TTS and voice streaming work, with quality/coverage refinements pending |
+| Startup reliability | Implemented | Root startup checks and host/binding alignment are in place |
 
 Recently completed in this implementation cycle:
 
-- Added production-oriented multi-provider AI routing with fallback behavior and timeout/retry handling
-- Integrated OpenRouter and Gemini provider options across backend, AI engine, and UI settings flows
-- Fixed renderer auto-TTS playback path and stream-state watchdog to reduce stuck-response states
-- Added AI readiness waiting and stronger socket-side resilience for cold-start scenarios
-- Resolved Chroma telemetry warning spam with explicit no-op telemetry implementation
-- Added root startup verification script and aligned host/binding behavior for reliable local bring-up
+- Added live system-info handling so system queries now use the backend's real `/api/system/info` data instead of LLM guesswork
+- Updated the AI engine to short-circuit `automation.system_info` requests and return formatted live CPU, RAM, OS, and uptime values
+- Improved chat bubble rendering so assistant responses are cleaner and action cards are hidden from normal conversation output
+- Added audible assistant reply playback with TTS plus browser speech fallback in the renderer
+- Improved chat response styling, typing feedback, and message metadata presentation
+- Added global workspace instructions for structured action responses and safe system-task handling
 
 ## 2. Runtime Topology
 
@@ -70,7 +70,7 @@ Implemented capabilities:
 - Tray integration and updater wiring
 - Window state persistence and restore behavior
 
-Current desktop integration is practical and security-aware rather than experimental. The shell is already usable as the application host.
+Current desktop integration is practical and security-aware rather than experimental. The shell is usable as the application host.
 
 Relevant files:
 
@@ -98,12 +98,15 @@ Implemented UI capabilities:
 - Multi-message chat timeline
 - Streaming assistant response rendering
 - Markdown and syntax-highlighted code blocks
+- Cleaner assistant response presentation with hidden action cards
 - Command suggestions for starter prompts
 - Workflow visualization in chat context
 - Voice status display and transcript preview
+- Audible assistant replies when voice is enabled
+- Browser speech fallback when TTS playback is unavailable
 - Global state via Zustand stores
 
-The UI appears to be beyond a prototype and already organized around product-level pages rather than a single demo surface.
+The UI is beyond a prototype and is organized around product-level pages rather than a single demo surface.
 
 Representative files:
 
@@ -128,6 +131,7 @@ Implemented backend concerns:
 - Endpoint-group rate limiting
 - Database initialization on startup
 - Socket.io setup for real-time chat and streaming behavior
+- Real-time system info endpoint with live CPU, RAM, OS, and uptime data
 
 Current route groups:
 
@@ -139,7 +143,7 @@ Current route groups:
 - `/ai/chat`
 - `/health`
 
-This layer is functioning as the application coordinator between the desktop app, AI engine, memory database, automation subsystem, and voice service.
+This layer acts as the application coordinator between the desktop app, AI engine, memory database, automation subsystem, and voice service.
 
 Representative files:
 
@@ -152,7 +156,7 @@ Representative files:
 
 ## 6. Chat and AI Integration
 
-The AI engine is implemented as a FastAPI service and the backend already bridges to it for local inference workflows.
+The AI engine is implemented as a FastAPI service and the backend bridges to it for local inference workflows.
 
 Implemented AI features:
 
@@ -163,19 +167,20 @@ Implemented AI features:
 - Ollama client integration for local LLM calls
 - OpenRouter client integration for cloud model inference
 - Gemini client integration for cloud model inference
-- Provider fallback routing chain with retry/timeout handling in backend AI service
+- Provider fallback routing chain with retry/timeout handling in the backend AI service
 - Response parsing layer
 - Task planning API
 - Emotion analysis API
 - Memory API integration
+- System-info intent short-circuiting to live backend system stats
 
 The AI engine is not just a thin proxy to Ollama. It already contains application logic for intent, prompt construction, memory injection, and task decomposition.
 
 Provider routing status:
 
 - Backend direct AI path (`/ai/chat`) supports Gemini, OpenRouter, and Ollama with fallback behavior
-- Existing chat pipeline (`/api/chat/message`) remains active through AI-engine orchestration
-- Startup checks now prefer cloud providers when keys are configured and only fall back to local models when needed
+- Chat requests that ask for system information now bypass the LLM and return live machine stats from the backend
+- Existing chat pipeline through the AI engine remains active for normal conversational requests
 
 Representative files:
 
@@ -212,7 +217,7 @@ Implemented memory behavior:
 - Audit logging for automation decisions
 - Shared DB path resolution across backend and AI engine
 
-Current status: relational persistence is real and active. Semantic vector memory is still deferred.
+Current status: relational persistence is real and active. Semantic vector memory remains a future improvement area.
 
 Representative files:
 
@@ -272,7 +277,7 @@ Implemented pieces:
 - WebSocket session streaming endpoint
 - Transcript push/broadcast support
 - Backend voice service bridge over HTTP and WebSocket
-- Structured audio frame bridge carrying `audioBase64`, format, sample rate, and channels from renderer to voice-engine websocket
+- Structured audio frame bridge carrying `audioBase64`, format, sample rate, and channels from renderer to the voice-engine websocket
 - Voice session state tracking in the backend
 - Renderer microphone capture path streaming 16 kHz mono PCM frames into the voice websocket bridge
 - Voice activity detection for speech/non-speech filtering before transcription
@@ -283,7 +288,7 @@ Implemented pieces:
 
 Current limitations:
 
-- STT coverage is currently strongest for WAV and PCM stream paths; additional codecs may still need normalization on ingress
+- STT coverage is strongest for WAV and PCM stream paths; additional codecs may still need normalization on ingress
 - Recognition quality and latency depend on host speech engine characteristics and microphone quality
 - Voice transport and orchestration are functional, but advanced conversational barge-in behavior is still a future refinement
 
@@ -313,8 +318,8 @@ Implemented now:
 
 Current maturity assessment:
 
-- Personality mode integration appears usable
-- Emotion pipeline now performs real weighted fusion of typing, voice, time, and optional webcam features
+- Personality mode integration is usable
+- Emotion pipeline performs weighted fusion of typing, voice, time, and optional webcam features
 - Some signal sources remain heuristic and should still be considered baseline rather than model-grade affect sensing
 
 Representative files:
@@ -350,26 +355,29 @@ Representative files:
 | Subsystem | Status | Notes |
 |---|---|---|
 | Electron shell | Implemented | Hardened desktop wrapper with tray, preload bridge, updater wiring |
-| React UI | Implemented | Multi-page UI with chat, automation, memory, settings |
+| React UI | Implemented | Multi-page UI with chat, automation, memory, settings, and voice surfaces |
 | Backend API | Implemented | Express routes, Socket.io, middleware, rate limits, DB bootstrap |
 | AI engine | Implemented | FastAPI routers, intent/prompt layers, OpenRouter/Gemini support, and local-model fallback |
 | Memory persistence | Implemented | Shared SQLite-backed sessions, messages, facts, habits, audit log |
 | Automation engine | Implemented | Workflow execution, permissions, validation, audit trail |
 | Voice transport | Implemented | Session/status/stream plumbing plus renderer PCM capture path |
-| STT/TTS | Implemented (baseline) | Offline Windows STT/TTS paths with WAV/PCM handling and TTS audio output |
+| STT/TTS | Implemented (baseline) | Offline Windows STT/TTS paths with WAV/PCM handling and assistant audio playback |
 | Wake-word / VAD | Implemented (baseline) | Phrase-based wake-word detection and RMS-based speech gating |
 | Vector memory | Implemented (baseline) | Local semantic retrieval over persisted facts/messages/habits |
 
-## 13. Key Gaps Between Documentation and Current Code
+## 13. Pending Work
 
-The main documentation is directionally correct, but the current repository is stronger in architecture and orchestration than in advanced sensory intelligence.
+The codebase is functional, but there are still meaningful implementation gaps.
 
-Most notable remaining gaps:
+Most notable remaining items:
 
-- Voice path is now offline-capable, but codec coverage beyond the active WAV/PCM flow still needs broader normalization support
-- Semantic retrieval is active, but current ranking is heuristic and can be further improved with richer embeddings/indexing
-- Habit learning and proactive suggestions now surface in chat actions, but long-horizon automation policy remains an iterative area
-- Emotion analysis is now operational and fused, though still primarily heuristic rather than model-trained affect inference
+- Broader voice codec coverage beyond the active WAV/PCM flow
+- Stronger handling for conversational barge-in and more resilient multi-turn voice interaction
+- Higher-quality semantic memory ranking and richer retrieval over facts/messages/habits
+- More proactive habit learning and smarter long-horizon suggestions
+- Better emotion inference quality if you want it to move beyond heuristic fusion
+- More end-to-end test coverage for chat, voice, and system-info flows
+- Optional UI refinements for a dedicated system-stats card if you want the live values displayed more visually
 
 ## 14. Overall Assessment
 
@@ -380,11 +388,13 @@ Current implementation quality is strongest in these areas:
 - Persistence and auditability
 - Workflow automation and permissions
 - Desktop shell security posture
+- Live system-info responses and audible chat playback
 
 Current implementation risk is highest in these areas:
 
 - Voice feature expectations versus actual delivery
-- Advanced memory and semantic retrieval claims versus active functionality
+- Advanced memory and semantic retrieval quality
 - Heuristic signal quality and ranking behavior under diverse real-world usage patterns
+- Codec and audio-path robustness on different Windows setups
 
-In practical terms, ELIXI is now a functional local desktop AI foundation with real chat, persistence, automation, semantic retrieval, baseline proactive habits, and a working offline voice pipeline. The current codebase is still a baseline implementation in several intelligence-heavy areas, but it is now beyond structural placeholders for the subsystems above.
+In practical terms, ELIXI is now a functional local desktop AI foundation with real chat, persistence, automation, semantic retrieval, baseline proactive habits, live system stats, and audible replies. The current codebase is still a baseline implementation in several intelligence-heavy areas, but it is now beyond structural placeholders for the subsystems above.

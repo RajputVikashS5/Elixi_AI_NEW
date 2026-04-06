@@ -59,6 +59,7 @@ class PromptBuilder:
                     confidence=emotion_context.confidence,
                 )
             )
+            parts.append(self.response_modulator.response_contract(state))
             if state == "stressed":
                 parts.append("The user appears stressed — keep responses calm and reassuring.")
             elif state == "fatigued":
@@ -69,6 +70,8 @@ class PromptBuilder:
                 parts.append("The user is in deep focus mode — be extremely direct and brief.")
             elif state == "motivated":
                 parts.append("The user seems motivated — match their energy with an upbeat, helpful tone.")
+        else:
+            parts.append(self.response_modulator.response_contract("neutral"))
 
         if injected_memories:
             memories_block = "\n".join(f"- {m}" for m in injected_memories)

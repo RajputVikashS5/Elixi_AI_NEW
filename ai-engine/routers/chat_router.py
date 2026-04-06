@@ -3,10 +3,13 @@
 import json
 import logging
 import os
+import platform
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+import httpx
 
 from models.schemas import ChatRequest, ChatResponse, IntentRequest, IntentResponse
+from models.enums import IntentCategory
 from intent_engine.intent_classifier import IntentClassifier
 from intent_engine.entity_extractor import EntityExtractor
 from intent_engine.prompt_builder import PromptBuilder
@@ -36,6 +39,7 @@ memory_router = MemoryRouter()
 
 DEFAULT_OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", os.getenv("ELIXI_ONLINE_MODEL", "meta-llama/llama-3-8b-instruct"))
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+BACKEND_URL = os.getenv("BACKEND_URL", os.getenv("ELIXI_BACKEND_URL", "http://127.0.0.1:3001")).rstrip("/")
 
 
 def _to_sse(payload: dict) -> str:
@@ -57,6 +61,81 @@ def _merge_actions(base_actions: list[dict] | None, proactive_habits: list[dict]
         seen.add(key)
 
     return merged
+
+
+def _format_gb(value: int | float) -> str:
+    return f"{value / (1024 ** 3):.1f} GB"
+
+
+def _format_uptime(seconds: int | float | None) -> str:
+    if seconds is None:
+        return "unknown"
+
+    total_seconds = int(seconds)
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or not parts:
+        parts.append(f"{minutes}m")
+
+    return " ".join(parts)
+
+
+async def _fetch_system_info() -> dict:
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(f"{BACKEND_URL}/api/system/info")
+        response.raise_for_status()
+        return response.json()
+
+
+def _build_system_info_response(system_info: dict) -> dict:
+    cpu_load = float(system_info.get("cpu") or 0.0)
+    ram = system_info.get("ram") or {}
+    cpu_info = system_info.get("cpuInfo") or {}
+    os_info = system_info.get("osInfo") or {}
+
+    cpu_parts = [part for part in [cpu_info.get("brand"), cpu_info.get("manufacturer")] if part]
+    cpu_label = " ".join(cpu_parts).strip() or "CPU"
+    os_parts = [
+        os_info.get("distro") or os_info.get("platform") or system_info.get("platform") or platform.system(),
+        os_info.get("release"),
+    ]
+    os_label = " ".join(part for part in os_parts if part).strip()
+
+    response_text = "\n".join(
+        [
+            "Here's your system information:",
+            f"CPU {cpu_label} ({cpu_load:.1f}%)",
+            f"RAM {_format_gb(ram.get('used', 0))} / {_format_gb(ram.get('total', 0))}",
+            f"OS {os_label}",
+            f"Uptime {_format_uptime(system_info.get('uptime'))}",
+        ]
+    )
+
+    return {
+        "intent": "automation.system_info",
+        "emotion_detected": "neutral",
+        "response_text": response_text,
+        "message": response_text,
+        "voice_tone": "neutral",
+        "action": "respond",
+        "confidence": 1.0,
+        "content": response_text,
+        "response": response_text,
+        "entities": {
+            "cpu": cpu_load,
+            "ram_used": ram.get("used"),
+            "ram_total": ram.get("total"),
+            "os": os_label,
+        },
+        "actions": [],
+    }
 
 
 @router.post("/intent", response_model=IntentResponse)
@@ -113,6 +192,44 @@ async def chat(body: ChatRequest, user: AuthUser = Depends(require_auth)):
     
     intent_confidence = intent_classifier.confidence_for(body.message, intent)
     entities = entity_extractor.extract_all(body.message)
+
+    if intent == IntentCategory.AUTOMATION_SYSTEM_INFO:
+        try:
+            system_info = await _fetch_system_info()
+            response_payload = _build_system_info_response(system_info)
+            if body.stream:
+                async def system_info_stream():
+                    yield _to_sse({**response_payload, "done": True})
+
+                return StreamingResponse(system_info_stream(), media_type="text/event-stream")
+
+            return ChatResponse(**response_payload)
+        except Exception as exc:
+            logger.warning("System info lookup failed", exc_info=exc)
+            fallback_text = "I could not retrieve live system information right now."
+            if body.stream:
+                async def fallback_stream():
+                    yield _to_sse({
+                        "error": fallback_text,
+                        "done": True,
+                    })
+
+                return StreamingResponse(fallback_stream(), media_type="text/event-stream")
+
+            return ChatResponse(
+                intent=IntentCategory.AUTOMATION_SYSTEM_INFO.value,
+                emotion_detected="neutral",
+                response_text=fallback_text,
+                message=fallback_text,
+                voice_tone="neutral",
+                action="respond",
+                confidence=0.5,
+                content=fallback_text,
+                response=fallback_text,
+                entities={},
+                actions=[],
+            )
+
     provider = body.llmProvider.value if body.llmProvider else "ollama"
     ollama_model = body.ollamaModel.value if body.ollamaModel else "llama3"
     configured_online_model = (body.onlineModel or "").strip()

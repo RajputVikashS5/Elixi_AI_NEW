@@ -3,14 +3,22 @@ import si from 'systeminformation';
 
 export async function getSystemInfo(_req: Request, res: Response, next: NextFunction) {
   try {
-    const [cpu, mem, time] = await Promise.all([
+    const [cpu, mem, time, cpuInfo, osInfo] = await Promise.all([
       si.currentLoad(),
       si.mem(),
       si.time(),
+      si.cpu(),
+      si.osInfo(),
     ]);
 
     return res.json({
       cpu: cpu.currentLoad,
+      cpuInfo: {
+        manufacturer: cpuInfo.manufacturer,
+        brand: cpuInfo.brand,
+        speed: cpuInfo.speed,
+        cores: cpuInfo.cores,
+      },
       ram: {
         used: mem.used,
         total: mem.total,
@@ -18,6 +26,14 @@ export async function getSystemInfo(_req: Request, res: Response, next: NextFunc
       },
       uptime: time.uptime,
       platform: process.platform,
+      osInfo: {
+        platform: osInfo.platform,
+        distro: osInfo.distro,
+        release: osInfo.release,
+        codename: osInfo.codename,
+        kernel: osInfo.kernel,
+        arch: osInfo.arch,
+      },
     });
   } catch (err) {
     next(err);

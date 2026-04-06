@@ -11,6 +11,7 @@ import { CommandSuggestions } from '../components/chat/CommandSuggestions';
 import { VoiceStatusBadge } from '../components/voice/VoiceStatusBadge';
 import { WorkflowVisualizer } from '../components/automation/WorkflowVisualizer';
 import { EmotionTimelinePanel } from '../components/emotion/EmotionTimelinePanel';
+import { EmotionIndicator } from '../components/emotion/EmotionIndicator';
 import { useVoiceStore } from '../store/voiceStore';
 import { Button } from '../components/ui/Button';
 
@@ -72,13 +73,18 @@ const ChatPage: React.FC = () => {
           : 'Backend disconnected';
   const backendStatusMessage =
     connectionError || 'ELIXI cannot reach the backend on http://127.0.0.1:3001. Restart the backend to send chat requests.';
+  const emotionConfidenceLabel = `${Math.round(emotion.confidence * 100)}%`;
 
   return (
     <div className="flex flex-col h-full bg-elixi-bg">
       {/* Chat header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-elixi-border bg-elixi-surface shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-wrap">
           <span className="text-sm font-medium text-elixi-text">Chat</span>
+          <EmotionIndicator state={emotion.state} />
+          <span className="text-xs text-elixi-muted" title={`Updated ${emotion.updatedAt.toLocaleTimeString()}`}>
+            {emotionConfidenceLabel} confidence
+          </span>
           <VoiceStatusBadge status={voiceStatus} />
           {transcript ? (
             <span className="text-xs text-elixi-muted truncate max-w-[320px]" title={transcript}>

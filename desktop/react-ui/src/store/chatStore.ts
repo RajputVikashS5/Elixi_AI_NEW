@@ -7,6 +7,7 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   intent?: string;
+  voiceTone?: 'calm' | 'energetic' | 'supportive' | 'neutral' | string;
   actions?: ActionResult[];
   isStreaming?: boolean;
 }

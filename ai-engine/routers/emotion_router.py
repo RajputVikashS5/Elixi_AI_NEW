@@ -1,6 +1,7 @@
 """Emotion detection endpoints."""
 
 import asyncio
+import os
 
 from fastapi import APIRouter
 
@@ -14,11 +15,29 @@ from emotion_engine.camera_manager import get_camera_manager
 
 router = APIRouter()
 
+
+def _get_env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
 typing_analyzer = TypingAnalyzer()
 voice_analyzer = VoiceToneAnalyzer()
 time_analyzer = TimeBehaviorAnalyzer()
 webcam_analyzer = WebcamAnalyzer()
-aggregator = EmotionAggregator()
+aggregator = EmotionAggregator(
+    source_weights={
+        "typing": _get_env_float("ELIXI_EMOTION_WEIGHT_TYPING", 1.0),
+        "voice": _get_env_float("ELIXI_EMOTION_WEIGHT_VOICE", 1.0),
+        "time": _get_env_float("ELIXI_EMOTION_WEIGHT_TIME", 0.7),
+        "webcam": _get_env_float("ELIXI_EMOTION_WEIGHT_WEBCAM", 0.8),
+    },
+    min_confidence=_get_env_float("ELIXI_EMOTION_MIN_CONFIDENCE", 0.0),
+)
 camera_manager = get_camera_manager(enabled=False)  # Disabled by default (privacy-first)
 
 
@@ -43,6 +62,24 @@ async def detect_emotion(body: EmotionRequest) -> EmotionResponse:
     
     final = await asyncio.to_thread(aggregator.aggregate, signals)
     return EmotionResponse(state=final["state"], confidence=final["confidence"], signals=final["signals"])
+
+
+@router.get("/emotion/config")
+async def get_emotion_config() -> dict:
+    """Get current emotion aggregation calibration settings."""
+    return aggregator.get_config()
+
+
+@router.post("/emotion/config")
+async def update_emotion_config(payload: dict) -> dict:
+    """Update emotion aggregation calibration settings."""
+    source_weights = payload.get("source_weights") if isinstance(payload.get("source_weights"), dict) else None
+    min_confidence = payload.get("min_confidence")
+    updated = aggregator.update_config(
+        source_weights=source_weights,
+        min_confidence=min_confidence if isinstance(min_confidence, (int, float)) else None,
+    )
+    return updated
 
 
 @router.post("/camera/enable")

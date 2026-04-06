@@ -1,0 +1,86 @@
+﻿{
+    "generatedAt":  "2026-04-06T10:26:22.9726640+05:30",
+    "summary":  {
+                    "totalChecks":  15,
+                    "passed":  15,
+                    "failed":  0,
+                    "successRate":  100
+                },
+    "checks":  [
+                   {
+                       "name":  "Port 8000 AI",
+                       "status":  "PASS",
+                       "detail":  "online"
+                   },
+                   {
+                       "name":  "Port 3001 Backend",
+                       "status":  "PASS",
+                       "detail":  "online"
+                   },
+                   {
+                       "name":  "Port 8001 Voice",
+                       "status":  "PASS",
+                       "detail":  "online"
+                   },
+                   {
+                       "name":  "Port 5173 UI",
+                       "status":  "PASS",
+                       "detail":  "online"
+                   },
+                   {
+                       "name":  "AI Auth Token",
+                       "status":  "PASS",
+                       "detail":  "token received"
+                   },
+                   {
+                       "name":  "AI Intent",
+                       "status":  "PASS",
+                       "detail":  "intent=get_weather"
+                   },
+                   {
+                       "name":  "AI Chat Non-Stream Local",
+                       "status":  "PASS",
+                       "detail":  "intent=chat.greeting"
+                   },
+                   {
+                       "name":  "AI Chat Stream Local",
+                       "status":  "PASS",
+                       "detail":  "sse=true"
+                   },
+                   {
+                       "name":  "AI Chat Non-Stream Online",
+                       "status":  "PASS",
+                       "detail":  "intent=chat.greeting"
+                   },
+                   {
+                       "name":  "AI Chat Stream Online",
+                       "status":  "PASS",
+                       "detail":  "sse=true"
+                   },
+                   {
+                       "name":  "Backend System Info",
+                       "status":  "PASS",
+                       "detail":  "cpu=67.04"
+                   },
+                   {
+                       "name":  "Backend Providers Status",
+                       "status":  "PASS",
+                       "detail":  "openrouter=True gemini=True"
+                   },
+                   {
+                       "name":  "Backend Voice Capabilities",
+                       "status":  "PASS",
+                       "detail":  "status=ok"
+                   },
+                   {
+                       "name":  "Backend Chat Message Local",
+                       "status":  "PASS",
+                       "detail":  "success=True"
+                   },
+                   {
+                       "name":  "Backend Chat History",
+                       "status":  "PASS",
+                       "detail":  "count=2"
+                   }
+               ]
+}

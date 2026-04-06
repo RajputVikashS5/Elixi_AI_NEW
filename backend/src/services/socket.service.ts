@@ -1,5 +1,6 @@
 import { Server as SocketServer } from 'socket.io';
 import axios from 'axios';
+import si from 'systeminformation';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 import { sanitizeInput } from '../utils/sanitizer';
@@ -36,6 +37,103 @@ function normalizeSocketError(err: unknown): string {
     return err.message;
   }
   return String(err);
+}
+
+function extractDisplayText(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    const candidate = [
+      parsed.response_text,
+      parsed.message,
+      parsed.content,
+      parsed.response,
+    ].find((item) => typeof item === 'string' && item.trim().length > 0);
+
+    return typeof candidate === 'string' ? candidate.trim() : trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+function formatMemoryUsage(usedBytes: number, totalBytes: number): string {
+  const usedGb = usedBytes / (1024 ** 3);
+  const totalGb = totalBytes / (1024 ** 3);
+  return `${usedGb.toFixed(1)} GB / ${totalGb.toFixed(1)} GB`;
+}
+
+function formatSystemStatsBlock(cpuDisplay: string, ramDisplay: string, osDisplay: string): string {
+  return [
+    'Here\'s your system information:',
+    `CPU ${cpuDisplay}`,
+    `RAM ${ramDisplay}`,
+    `OS ${osDisplay}`,
+  ].join('\n');
+}
+
+async function injectRealtimeStats(text: string): Promise<string> {
+  if (!text) {
+    return text;
+  }
+
+  const hasSystemStatsPattern = /cpu\s*:|ram\s*:|os\s*:/i.test(text);
+  if (!hasSystemStatsPattern) {
+    return text;
+  }
+
+  try {
+    const [cpu, mem, osInfo] = await Promise.all([
+      si.currentLoad(),
+      si.mem(),
+      si.osInfo(),
+    ]);
+
+    const cpuDisplay = `${cpu.currentLoad.toFixed(1)}%`;
+    const ramDisplay = formatMemoryUsage(mem.used, mem.total);
+    const osDisplay = `${osInfo.distro || osInfo.platform} ${osInfo.release || ''}`.trim();
+    const formattedBlock = formatSystemStatsBlock(cpuDisplay, ramDisplay, osDisplay);
+
+    const bracketPattern = /\[\s*CPU\s*:\s*[^,\]]+\s*,\s*RAM\s*:\s*[^,\]]+\s*,\s*OS\s*:\s*[^\]]+\]/i;
+    const inlinePattern = /CPU\s*:\s*[^,\n]+,\s*RAM\s*:\s*[^,\n]+,\s*OS\s*:\s*[^.\n]+/i;
+    const headingPattern = /Here's your system information:\s*\[?\s*CPU\s*[:\s][\s\S]*?$/i;
+
+    let enriched = text;
+    if (bracketPattern.test(enriched)) {
+      enriched = enriched.replace(
+        bracketPattern,
+        formattedBlock
+      );
+    } else if (inlinePattern.test(enriched)) {
+      enriched = enriched.replace(
+        inlinePattern,
+        formatSystemStatsBlock(cpuDisplay, ramDisplay, osDisplay)
+      );
+    } else if (headingPattern.test(enriched)) {
+      enriched = enriched.replace(
+        headingPattern,
+        formattedBlock
+      );
+    }
+
+    return enriched;
+  } catch (err) {
+    logger.debug('Failed to inject realtime system stats', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return text;
+  }
 }
 
 async function waitForAiEngineReady(timeoutMs = AI_READY_TIMEOUT_MS): Promise<boolean> {
@@ -169,8 +267,10 @@ export function setupSocketHandlers(io: SocketServer): void {
         const response = await requestChatStream();
 
         let fullContent = '';
+        let emittedReply = false;
         let finalActions: unknown[] | undefined;
         let finalIntent: string | undefined;
+        let finalVoiceTone: string | undefined;
         let finalError: string | undefined;
         let pendingChunk = '';
 
@@ -196,13 +296,25 @@ export function setupSocketHandlers(io: SocketServer): void {
                 fullContent = parsed.error;
               }
               socket.emit('chat:token', { token: parsed.error });
+              emittedReply = true;
             }
 
             if (parsed.done) {
               finalActions = parsed.actions;
               finalIntent = parsed.intent;
-              if (!fullContent && typeof parsed.content === 'string') {
-                fullContent = parsed.content;
+              finalVoiceTone = typeof parsed.voice_tone === 'string' ? parsed.voice_tone : undefined;
+
+              const finalizedText = [
+                parsed.response_text,
+                parsed.message,
+                parsed.content,
+                parsed.response,
+              ].find((item) => typeof item === 'string' && item.trim().length > 0);
+
+              if (typeof finalizedText === 'string') {
+                fullContent = extractDisplayText(finalizedText);
+              } else {
+                fullContent = extractDisplayText(fullContent);
               }
               return;
             }
@@ -213,12 +325,10 @@ export function setupSocketHandlers(io: SocketServer): void {
 
             if (token) {
               fullContent += token;
-              socket.emit('chat:token', { token });
             }
           } catch {
             // If JSON parsing fails, treat the payload as a raw text token.
             fullContent += payload;
-            socket.emit('chat:token', { token: payload });
           }
         };
 
@@ -238,9 +348,18 @@ export function setupSocketHandlers(io: SocketServer): void {
             pendingChunk = '';
           }
 
+          const cleanedFinalContent = await injectRealtimeStats(extractDisplayText(fullContent));
+          if (cleanedFinalContent && !emittedReply && !finalError) {
+            socket.emit('chat:token', { token: cleanedFinalContent });
+            emittedReply = true;
+          }
+
+          fullContent = cleanedFinalContent || fullContent;
+
           socket.emit('chat:complete', {
             messageId: assistantMsgId,
             intent: finalIntent || 'chat.general',
+            voiceTone: finalVoiceTone,
             actions: finalActions,
             error: Boolean(finalError),
           });

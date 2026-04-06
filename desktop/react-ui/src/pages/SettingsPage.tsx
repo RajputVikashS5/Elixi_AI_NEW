@@ -94,6 +94,21 @@ type ActiveProviderResponse = {
   source: string;
 };
 
+type EmotionCameraStatusResponse = {
+  status: { enabled?: boolean; active?: boolean; ready?: boolean; permission?: string; message?: string } | string;
+  emotion_signal?: { state?: string; confidence?: number; source?: string; summary?: string };
+};
+
+type EmotionCalibrationResponse = {
+  source_weights: {
+    typing: number;
+    voice: number;
+    time: number;
+    webcam: number;
+  };
+  min_confidence: number;
+};
+
 const StatusDot: React.FC<{ ok: boolean }> = ({ ok }) => (
   <span
     className={`inline-block h-2.5 w-2.5 rounded-full ${ok ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.65)]' : 'bg-rose-400 shadow-[0_0_8px_rgba(251,113,133,0.55)]'}`}
@@ -106,6 +121,10 @@ const SettingsPage: React.FC = () => {
   const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
   const [activeProvider, setActiveProvider] = useState<ActiveProviderResponse | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
+  const [emotionCameraStatus, setEmotionCameraStatus] = useState<EmotionCameraStatusResponse | null>(null);
+  const [emotionCameraLoading, setEmotionCameraLoading] = useState(false);
+  const [emotionCalibration, setEmotionCalibration] = useState<EmotionCalibrationResponse | null>(null);
+  const [emotionCalibrationLoading, setEmotionCalibrationLoading] = useState(false);
 
   // Load available SAPI voices from voice engine
   useEffect(() => {
@@ -148,9 +167,79 @@ const SettingsPage: React.FC = () => {
     }
   }, []);
 
+  const refreshEmotionCameraStatus = useCallback(async () => {
+    setEmotionCameraLoading(true);
+    try {
+      const response = await api.get<EmotionCameraStatusResponse>('/ai/camera/status');
+      setEmotionCameraStatus(response.data);
+    } catch {
+      setEmotionCameraStatus(null);
+    } finally {
+      setEmotionCameraLoading(false);
+    }
+  }, []);
+
+  const setEmotionCameraEnabled = useCallback(async (enabled: boolean) => {
+    setEmotionCameraLoading(true);
+    try {
+      if (enabled) {
+        await api.post('/ai/camera/enable');
+      } else {
+        await api.post('/ai/camera/disable');
+      }
+      await refreshEmotionCameraStatus();
+    } catch {
+      setEmotionCameraStatus(null);
+    } finally {
+      setEmotionCameraLoading(false);
+    }
+  }, [refreshEmotionCameraStatus]);
+
+  const refreshEmotionCalibration = useCallback(async () => {
+    setEmotionCalibrationLoading(true);
+    try {
+      const response = await api.get<EmotionCalibrationResponse>('/ai/emotion/config');
+      setEmotionCalibration(response.data);
+    } catch {
+      setEmotionCalibration(null);
+    } finally {
+      setEmotionCalibrationLoading(false);
+    }
+  }, []);
+
+  const commitEmotionCalibration = useCallback(async (patch: {
+    source_weights?: Partial<EmotionCalibrationResponse['source_weights']>;
+    min_confidence?: number;
+  }) => {
+    setEmotionCalibrationLoading(true);
+    try {
+      const source_weights = {
+        typing: patch.source_weights?.typing ?? emotionCalibration?.source_weights.typing ?? 1,
+        voice: patch.source_weights?.voice ?? emotionCalibration?.source_weights.voice ?? 1,
+        time: patch.source_weights?.time ?? emotionCalibration?.source_weights.time ?? 0.7,
+        webcam: patch.source_weights?.webcam ?? emotionCalibration?.source_weights.webcam ?? 0.8,
+      };
+      const min_confidence = patch.min_confidence ?? emotionCalibration?.min_confidence ?? 0;
+      await api.post('/ai/emotion/config', { source_weights, min_confidence });
+      await refreshEmotionCalibration();
+    } catch {
+      // Keep last known values on failure.
+    } finally {
+      setEmotionCalibrationLoading(false);
+    }
+  }, [emotionCalibration, refreshEmotionCalibration]);
+
   useEffect(() => {
     void refreshProviderStatus();
   }, [refreshProviderStatus]);
+
+  useEffect(() => {
+    void refreshEmotionCameraStatus();
+  }, [refreshEmotionCameraStatus]);
+
+  useEffect(() => {
+    void refreshEmotionCalibration();
+  }, [refreshEmotionCalibration]);
 
   const personalityOptions: { value: PersonalityMode; label: string }[] = [
     { value: 'professional', label: 'Professional' },
@@ -283,6 +372,147 @@ const SettingsPage: React.FC = () => {
             </div>
           ) : (
             <p className="text-xs text-rose-300">Provider status unavailable. Verify backend URL and restart backend.</p>
+          )}
+        </div>
+      </Section>
+
+      <Section title="Emotion">
+        <SettingRow
+          label="Camera Emotion"
+          description="Optional webcam-based emotion detection. Disabled by default for privacy."
+        >
+          <Toggle
+            checked={Boolean(
+              typeof emotionCameraStatus?.status === 'object'
+                ? (emotionCameraStatus.status.enabled ?? emotionCameraStatus.status.active)
+                : false
+            )}
+            onChange={(checked) => void setEmotionCameraEnabled(checked)}
+          />
+        </SettingRow>
+
+        <div className="rounded-lg border border-elixi-border bg-elixi-bg/60 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-elixi-text">Live Emotion Status</p>
+            <button
+              type="button"
+              onClick={() => void refreshEmotionCameraStatus()}
+              disabled={emotionCameraLoading}
+              className="text-xs px-2 py-1 rounded border border-elixi-border text-elixi-muted hover:text-elixi-text hover:border-elixi-primary/50 disabled:opacity-60"
+            >
+              {emotionCameraLoading ? 'Updating...' : 'Refresh'}
+            </button>
+          </div>
+
+          {emotionCameraStatus ? (
+            <div className="space-y-1 text-xs text-elixi-muted">
+              <p>
+                Mode: {' '}
+                <span className="text-elixi-text">
+                  {typeof emotionCameraStatus.status === 'string'
+                    ? emotionCameraStatus.status
+                    : emotionCameraStatus.status.enabled || emotionCameraStatus.status.active
+                      ? 'enabled'
+                      : 'disabled'}
+                </span>
+              </p>
+              {emotionCameraStatus.emotion_signal ? (
+                <p>
+                  Signal: {' '}
+                  <span className="text-elixi-text">
+                    {emotionCameraStatus.emotion_signal.state || 'unknown'}
+                    {typeof emotionCameraStatus.emotion_signal.confidence === 'number'
+                      ? ` (${Math.round(emotionCameraStatus.emotion_signal.confidence * 100)}%)`
+                      : ''}
+                  </span>
+                </p>
+              ) : null}
+              {typeof emotionCameraStatus.status === 'object' && emotionCameraStatus.status.message ? (
+                <p>{emotionCameraStatus.status.message}</p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-xs text-elixi-muted">Camera emotion status unavailable. Keep it disabled if you do not need webcam analysis.</p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-elixi-border bg-elixi-bg/60 p-3 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-elixi-text">Emotion Calibration</p>
+            <button
+              type="button"
+              onClick={() => void refreshEmotionCalibration()}
+              disabled={emotionCalibrationLoading}
+              className="text-xs px-2 py-1 rounded border border-elixi-border text-elixi-muted hover:text-elixi-text hover:border-elixi-primary/50 disabled:opacity-60"
+            >
+              {emotionCalibrationLoading ? 'Updating...' : 'Refresh'}
+            </button>
+          </div>
+
+          {emotionCalibration ? (
+            <>
+              <SettingRow label="Typing Weight" description="Influence of typing dynamics on emotion state">
+                <Slider
+                  value={emotionCalibration.source_weights.typing}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  onChange={(v) => setEmotionCalibration((prev) => prev ? ({ ...prev, source_weights: { ...prev.source_weights, typing: v } }) : prev)}
+                  onCommit={(v) => void commitEmotionCalibration({ source_weights: { typing: v } })}
+                  formatLabel={(v) => v.toFixed(1)}
+                />
+              </SettingRow>
+
+              <SettingRow label="Voice Weight" description="Influence of voice tone signals">
+                <Slider
+                  value={emotionCalibration.source_weights.voice}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  onChange={(v) => setEmotionCalibration((prev) => prev ? ({ ...prev, source_weights: { ...prev.source_weights, voice: v } }) : prev)}
+                  onCommit={(v) => void commitEmotionCalibration({ source_weights: { voice: v } })}
+                  formatLabel={(v) => v.toFixed(1)}
+                />
+              </SettingRow>
+
+              <SettingRow label="Time Weight" description="Influence of time-of-day behavior heuristics">
+                <Slider
+                  value={emotionCalibration.source_weights.time}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  onChange={(v) => setEmotionCalibration((prev) => prev ? ({ ...prev, source_weights: { ...prev.source_weights, time: v } }) : prev)}
+                  onCommit={(v) => void commitEmotionCalibration({ source_weights: { time: v } })}
+                  formatLabel={(v) => v.toFixed(1)}
+                />
+              </SettingRow>
+
+              <SettingRow label="Webcam Weight" description="Influence of optional camera emotion signal">
+                <Slider
+                  value={emotionCalibration.source_weights.webcam}
+                  min={0}
+                  max={3}
+                  step={0.1}
+                  onChange={(v) => setEmotionCalibration((prev) => prev ? ({ ...prev, source_weights: { ...prev.source_weights, webcam: v } }) : prev)}
+                  onCommit={(v) => void commitEmotionCalibration({ source_weights: { webcam: v } })}
+                  formatLabel={(v) => v.toFixed(1)}
+                />
+              </SettingRow>
+
+              <SettingRow label="Minimum Confidence" description="Ignore weak emotion signals below this threshold">
+                <Slider
+                  value={emotionCalibration.min_confidence}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onChange={(v) => setEmotionCalibration((prev) => prev ? ({ ...prev, min_confidence: v }) : prev)}
+                  onCommit={(v) => void commitEmotionCalibration({ min_confidence: v })}
+                  formatLabel={(v) => `${Math.round(v * 100)}%`}
+                />
+              </SettingRow>
+            </>
+          ) : (
+            <p className="text-xs text-elixi-muted">Emotion calibration unavailable. Ensure AI engine is running and reachable.</p>
           )}
         </div>
       </Section>
