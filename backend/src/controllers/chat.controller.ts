@@ -37,8 +37,8 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       emotionState: emotionContext?.state,
     });
 
-    // Get AI response (non-streaming REST endpoint)
-    const response = await aiService.chat({
+    // Get AI response (prefer AI engine; fallback to provider router for resiliency)
+    let response = await aiService.chat({
       sessionId,
       message: sanitizedMessage,
       emotionContext,
@@ -46,6 +46,26 @@ export async function sendMessage(req: Request, res: Response, next: NextFunctio
       llmProvider,
       ollamaModel,
       onlineModel,
+    }).catch(async () => {
+      if (llmProvider !== 'ollama') {
+        throw new Error('AI Engine unavailable for requested provider');
+      }
+
+      const fallback = await aiService.chatWithFallback({
+        message: sanitizedMessage,
+        personalityMode,
+        llmProvider,
+        ollamaModel,
+        onlineModel,
+        emotionContext,
+        stream: false,
+      });
+
+      return {
+        content: fallback.reply,
+        intent: 'chat.general',
+        actions: [],
+      };
     });
 
     const assistantMessageId = uuidv4();

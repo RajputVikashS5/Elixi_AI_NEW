@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Plus, ListChecks, FileStack, History, Trash2, X, Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { WorkflowCard } from '../components/automation/WorkflowCard';
 import { PermissionDialog } from '../components/automation/PermissionDialog';
 import {
@@ -22,6 +23,7 @@ const EMPTY_STEP: WorkflowStep = {
 };
 
 const AutomationPage: React.FC = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<AutomationTab>('workflows');
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -69,6 +71,22 @@ const AutomationPage: React.FC = () => {
       return true;
     });
   }, [auditLogs, auditStatusFilter, auditSearch]);
+
+  const isLearningPinnedWorkflow = useCallback((workflow: Workflow) => {
+    const name = workflow.name?.trim().toLowerCase() || '';
+    const description = workflow.description?.trim().toLowerCase() || '';
+    return name.startsWith('learned:') || description.includes('pinned from adaptive learning suggestion');
+  }, []);
+
+  const pinnedLearningWorkflows = useMemo(
+    () => workflows.filter((wf) => isLearningPinnedWorkflow(wf)),
+    [workflows, isLearningPinnedWorkflow]
+  );
+
+  const regularWorkflows = useMemo(
+    () => workflows.filter((wf) => !isLearningPinnedWorkflow(wf)),
+    [workflows, isLearningPinnedWorkflow]
+  );
 
   useEffect(() => {
     loadWorkflows()
@@ -286,17 +304,68 @@ const AutomationPage: React.FC = () => {
             <p className="text-elixi-muted/60 text-xs mt-1">Switch to Builder to create your first workflow.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
-            {workflows.map((wf) => (
-              <WorkflowCard
-                key={wf.id}
-                workflow={wf}
-                onRun={handleRun}
-                onEdit={handleEditWorkflow}
-                onDelete={handleDeleteWorkflow}
-                isRunning={runningId === wf.id}
-              />
-            ))}
+          <div className="space-y-5">
+            <section className="rounded-card border border-elixi-border bg-elixi-surface p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-elixi-text">Pinned From Learning</h2>
+                  <p className="text-xs text-elixi-muted mt-0.5">Run, edit, or delete adaptive suggestions you pinned as workflows.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/learning')}
+                    className="no-drag rounded-md border border-elixi-border px-2 py-1 text-[11px] text-elixi-muted hover:text-elixi-text hover:border-elixi-primary/50"
+                  >
+                    Open Learning
+                  </button>
+                  <span className="text-xs text-elixi-muted">{pinnedLearningWorkflows.length}</span>
+                </div>
+              </div>
+
+              {pinnedLearningWorkflows.length === 0 ? (
+                <p className="text-xs text-elixi-muted">No pinned learning workflows yet. Pin one from the Learning page.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  {pinnedLearningWorkflows.map((wf) => (
+                    <WorkflowCard
+                      key={wf.id}
+                      workflow={wf}
+                      onRun={handleRun}
+                      onEdit={handleEditWorkflow}
+                      onDelete={handleDeleteWorkflow}
+                      isRunning={runningId === wf.id}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-elixi-muted uppercase tracking-wider">All Other Workflows</h2>
+                <span className="text-xs text-elixi-muted">{regularWorkflows.length}</span>
+              </div>
+
+              {regularWorkflows.length === 0 ? (
+                <div className="rounded-card border border-elixi-border bg-elixi-surface p-4 text-xs text-elixi-muted">
+                  No non-learning workflows available.
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  {regularWorkflows.map((wf) => (
+                    <WorkflowCard
+                      key={wf.id}
+                      workflow={wf}
+                      onRun={handleRun}
+                      onEdit={handleEditWorkflow}
+                      onDelete={handleDeleteWorkflow}
+                      isRunning={runningId === wf.id}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
         )
       )}

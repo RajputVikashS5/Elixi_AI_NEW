@@ -8,7 +8,7 @@ export interface HealthStatus {
 }
 
 class HealthService {
-  private healthCheckInterval: NodeJS.Timer | null = null;
+  private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckCallbacks: ((status: HealthStatus) => void)[] = [];
   private currentStatus: HealthStatus = {
     backend: false,

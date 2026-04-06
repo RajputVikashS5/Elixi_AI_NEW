@@ -1,5 +1,5 @@
 ﻿{
-    "generatedAt":  "2026-04-06T10:26:22.9726640+05:30",
+    "generatedAt":  "2026-04-06T12:20:32.0441173+05:30",
     "summary":  {
                     "totalChecks":  15,
                     "passed":  15,
@@ -40,7 +40,7 @@
                    {
                        "name":  "AI Chat Non-Stream Local",
                        "status":  "PASS",
-                       "detail":  "intent=chat.greeting"
+                       "detail":  "intent=greeting"
                    },
                    {
                        "name":  "AI Chat Stream Local",
@@ -50,7 +50,7 @@
                    {
                        "name":  "AI Chat Non-Stream Online",
                        "status":  "PASS",
-                       "detail":  "intent=chat.greeting"
+                       "detail":  "intent=greeting"
                    },
                    {
                        "name":  "AI Chat Stream Online",
@@ -60,7 +60,7 @@
                    {
                        "name":  "Backend System Info",
                        "status":  "PASS",
-                       "detail":  "cpu=67.04"
+                       "detail":  "cpu=21.85"
                    },
                    {
                        "name":  "Backend Providers Status",

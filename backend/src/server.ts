@@ -13,6 +13,13 @@ import { memoryRoutes } from './routes/memory.routes';
 import { voiceRoutes } from './routes/voice.routes';
 import { systemRoutes } from './routes/system.routes';
 import { aiRoutes } from './routes/ai.routes';
+import { learningRoutes } from './routes/learning.routes';
+import { integrationsRouter } from './routes/integrations.routes';
+import { githubIntegrationRouter } from './routes/github-integration.routes';
+import { browserIntegrationRouter } from './routes/browser-integration.routes';
+import { emailIntegrationRouter } from './routes/email-integration.routes';
+import { calendarIntegrationRouter } from './routes/calendar-integration.routes';
+import { startLearningSnapshotScheduler } from './services/learningSnapshot.service';
 import { setupSocketHandlers } from './services/socket.service';
 import { initializeDatabase } from './services/memory.service';
 import { getAiEngineAuthHeaders } from './services/aiAuth.service';
@@ -27,6 +34,7 @@ async function bootstrap() {
 
   // Initialize database
   await initializeDatabase();
+  startLearningSnapshotScheduler();
 
   // Security middleware
   app.use(helmet({
@@ -55,6 +63,12 @@ async function bootstrap() {
   app.use('/api/memory', memoryRoutes);
   app.use('/api/voice', voiceRoutes);
   app.use('/api/system', systemRoutes);
+  app.use('/api/learning', learningRoutes);
+  app.use('/api/integrations', integrationsRouter);
+  app.use('/api/integrations/github', githubIntegrationRouter);
+  app.use('/api/integrations/browser', browserIntegrationRouter);
+  app.use('/api/integrations/email', emailIntegrationRouter);
+  app.use('/api/integrations/calendar', calendarIntegrationRouter);
 
   // Health check
   // Socket.io

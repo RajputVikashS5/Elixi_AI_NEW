@@ -94,6 +94,27 @@ async def _fetch_system_info() -> dict:
         return response.json()
 
 
+async def _fetch_learning_verbosity() -> tuple[str | None, int | None]:
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            response = await client.get(f"{BACKEND_URL}/api/learning/insights?limit=5&min_occurrences=2")
+            response.raise_for_status()
+            payload = response.json()
+    except Exception:
+        return (None, None)
+
+    verbosity = payload.get("verbosityAdaptation") if isinstance(payload, dict) else None
+    if not isinstance(verbosity, dict):
+        return (None, None)
+
+    level = verbosity.get("level")
+    target_words = verbosity.get("targetResponseWords")
+
+    parsed_level = str(level) if isinstance(level, str) and level.strip() else None
+    parsed_target = int(target_words) if isinstance(target_words, (int, float)) else None
+    return (parsed_level, parsed_target)
+
+
 def _build_system_info_response(system_info: dict) -> dict:
     cpu_load = float(system_info.get("cpu") or 0.0)
     ram = system_info.get("ram") or {}
@@ -258,12 +279,15 @@ async def chat(body: ChatRequest, user: AuthUser = Depends(require_auth)):
     memory_lines = [f"{x.get('key')}: {x.get('value')}" for x in context.get("long_facts", [])[:5]]
     memory_lines.extend(x.get("content", "") for x in context.get("vector_matches", [])[:3])
     proactive_lines = [item.get("description", "") for item in context.get("proactive_habits", [])[:3]]
+    verbosity_level, target_response_words = await _fetch_learning_verbosity()
 
     system_prompt = prompt_builder.build_system_prompt(
         personality_mode=(body.personalityMode.value if body.personalityMode else "friendly"),
         emotion_context=body.emotionContext,
         injected_memories=memory_lines,
         proactive_habits=proactive_lines,
+        verbosity_level=verbosity_level,
+        target_response_words=target_response_words,
     )
 
     history = context.get("short_history", [])
@@ -275,6 +299,40 @@ async def chat(body: ChatRequest, user: AuthUser = Depends(require_auth)):
         emotion_detected = body.emotionContext.state
 
     async def model_streamer():
+        async def stream_online_fallback(fallback_reason: str):
+            fallback_candidates = [
+                ("openrouter", openrouter_model),
+                ("gemini", gemini_model),
+            ]
+
+            for fallback_provider, fallback_model in fallback_candidates:
+                if not online_client.is_configured(fallback_provider):
+                    continue
+                try:
+                    logger.warning(
+                        "Ollama unavailable (%s); falling back to %s",
+                        fallback_reason,
+                        fallback_provider,
+                    )
+                    async for token in online_client.chat(
+                        messages=messages,
+                        model=fallback_model,
+                        stream=True,
+                        provider=fallback_provider,
+                    ):
+                        yield token
+                    return
+                except Exception as fallback_exc:
+                    logger.warning(
+                        "Fallback provider %s failed after Ollama issue: %s",
+                        fallback_provider,
+                        fallback_exc,
+                    )
+
+            raise RuntimeError(
+                "Ollama is unavailable and no configured online fallback providers succeeded."
+            )
+
         if provider in {"online", "openrouter", "gemini"}:
             provider_key = "openrouter" if provider == "online" else provider
             provider_model = openrouter_model if provider_key == "openrouter" else gemini_model
@@ -306,8 +364,17 @@ async def chat(body: ChatRequest, user: AuthUser = Depends(require_auth)):
                     return
                 raise RuntimeError(f"{provider_key} AI request failed: {str(exc)}") from exc
 
-        async for token in ollama_client.chat(messages=messages, model=ollama_model, stream=True):
-            yield token
+        if not await ollama_client.is_available():
+            async for token in stream_online_fallback("connection check failed"):
+                yield token
+            return
+
+        try:
+            async for token in ollama_client.chat(messages=messages, model=ollama_model, stream=True):
+                yield token
+        except Exception as exc:
+            async for token in stream_online_fallback(str(exc)):
+                yield token
 
     if body.stream:
         async def stream_generator():

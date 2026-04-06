@@ -15,6 +15,8 @@ const ChatPage = lazy(() => import('./pages/ChatPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const AutomationPage = lazy(() => import('./pages/AutomationPage'));
 const MemoryPage = lazy(() => import('./pages/MemoryPage'));
+const LearningPage = lazy(() => import('./pages/LearningPage'));
+const IntegrationManager = lazy(() => import('./pages/IntegrationManager'));
 const VoicePage = lazy(() => import('./pages/VoicePage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const STARTUP_GREETING_SESSION_KEY = 'elixi_startup_greeted';
@@ -133,6 +135,8 @@ const App: React.FC = () => {
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/automation" element={<AutomationPage />} />
                 <Route path="/memory" element={<MemoryPage />} />
+                <Route path="/learning" element={<LearningPage />} />
+                <Route path="/integrations" element={<IntegrationManager />} />
                 <Route path="/voice" element={<VoicePage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>

@@ -1,6 +1,6 @@
 ﻿# Phase 5 Deep Sweep Report
 
-Generated: 2026-04-06 10:26:22
+Generated: 2026-04-06 12:20:32
 
 ## Summary
 
@@ -19,11 +19,11 @@ Generated: 2026-04-06 10:26:22
 | Port 5173 UI | PASS | online |
 | AI Auth Token | PASS | token received |
 | AI Intent | PASS | intent=get_weather |
-| AI Chat Non-Stream Local | PASS | intent=chat.greeting |
+| AI Chat Non-Stream Local | PASS | intent=greeting |
 | AI Chat Stream Local | PASS | sse=true |
-| AI Chat Non-Stream Online | PASS | intent=chat.greeting |
+| AI Chat Non-Stream Online | PASS | intent=greeting |
 | AI Chat Stream Online | PASS | sse=true |
-| Backend System Info | PASS | cpu=67.04 |
+| Backend System Info | PASS | cpu=21.85 |
 | Backend Providers Status | PASS | openrouter=True gemini=True |
 | Backend Voice Capabilities | PASS | status=ok |
 | Backend Chat Message Local | PASS | success=True |

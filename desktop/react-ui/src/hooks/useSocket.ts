@@ -16,7 +16,7 @@ function normalizeActions(actions: unknown[] | undefined): ActionResult[] | unde
     return undefined;
   }
 
-  const normalized = actions
+  const normalized: Array<ActionResult | null> = actions
     .map((raw) => {
       if (!raw || typeof raw !== 'object') {
         return null;
@@ -36,16 +36,20 @@ function normalizeActions(actions: unknown[] | undefined): ActionResult[] | unde
         ? source.status
         : 'pending';
 
-      return {
+      const normalizedAction: ActionResult = {
         type,
         target: typeof source.target === 'string' ? source.target : undefined,
         status,
         error: typeof source.error === 'string' ? source.error : undefined,
-      } satisfies ActionResult;
-    })
-    .filter((item): item is ActionResult => Boolean(item));
+      };
 
-  return normalized.length ? normalized : undefined;
+      return normalizedAction;
+    })
+    .filter((item): item is ActionResult => item !== null);
+
+  const filtered: ActionResult[] = normalized.filter((item): item is ActionResult => item !== null);
+
+  return filtered.length ? filtered : undefined;
 }
 
 function stripSpeechMarkup(text: string): string {

@@ -47,6 +47,8 @@ class PromptBuilder:
         emotion_context: Optional[EmotionContext] = None,
         injected_memories: Optional[list[str]] = None,
         proactive_habits: Optional[list[str]] = None,
+        verbosity_level: Optional[str] = None,
+        target_response_words: Optional[int] = None,
     ) -> str:
         base = _PERSONALITY_TEMPLATES.get(personality_mode, _PERSONALITY_TEMPLATES[_DEFAULT_PERSONALITY])
         parts = [base]
@@ -82,6 +84,26 @@ class PromptBuilder:
             parts.append(
                 "Recurring user patterns you may proactively suggest when useful, without being pushy:\n"
                 f"{habits_block}"
+            )
+
+        if verbosity_level:
+            level = verbosity_level.lower().strip()
+            if level == "concise":
+                parts.append(
+                    "Adaptive verbosity mode: concise. Prefer short, direct answers unless user asks for detail."
+                )
+            elif level == "detailed":
+                parts.append(
+                    "Adaptive verbosity mode: detailed. Provide richer context and more complete step-by-step guidance."
+                )
+            else:
+                parts.append(
+                    "Adaptive verbosity mode: balanced. Keep responses practical with moderate detail."
+                )
+
+        if target_response_words and target_response_words > 0:
+            parts.append(
+                f"Target response length: about {int(target_response_words)} words unless user explicitly requests otherwise."
             )
 
         parts.append("Current platform: Desktop (Windows/macOS/Linux). You have access to automation capabilities.")
