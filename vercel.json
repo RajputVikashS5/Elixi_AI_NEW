@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run build:ui --workspace=desktop",
+  "outputDirectory": "desktop/react-ui/dist",
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
