@@ -1,6 +1,6 @@
 {
-  "buildCommand": "cd desktop && npm run build:ui",
-  "outputDirectory": "desktop/react-ui/dist",
+  "buildCommand": "npm run build:ui",
+  "outputDirectory": "react-ui/dist",
   "rewrites": [
     {
       "source": "/(.*)",
