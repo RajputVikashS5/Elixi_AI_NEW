@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npm run build:ui --workspace=desktop",
+  "buildCommand": "cd desktop && npm run build:ui",
   "outputDirectory": "desktop/react-ui/dist",
   "rewrites": [
     {
