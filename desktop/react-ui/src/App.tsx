@@ -40,6 +40,13 @@ const App: React.FC = () => {
   useEffect(() => {
     let canceled = false;
 
+    // Startup speech is optional because TTS can be slow or unavailable in dev.
+    if (import.meta.env.VITE_ENABLE_STARTUP_VOICE_GREETING !== '1') {
+      return () => {
+        canceled = true;
+      };
+    }
+
     const hasGreeted = window.sessionStorage.getItem(STARTUP_GREETING_SESSION_KEY) === '1';
     if (hasGreeted) {
       return;
